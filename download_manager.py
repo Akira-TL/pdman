@@ -124,25 +124,40 @@ class DownloadThread:
                 chunk_file = self.get_chunk_file()
                 mode = 'ab' if os.path.exists(chunk_file) else 'wb'
                 
+                batch_size = 0
+                batch_count = 0
                 with open(chunk_file, mode) as f:
                     for chunk in response.iter_content(chunk_size=self.config.chunk_size):
                         if chunk:
                             f.write(chunk)
                             chunk_len = len(chunk)
+                            batch_size += chunk_len
+                            batch_count += 1
                             
-                            with self.lock:
-                                self.current_pos += chunk_len
-                                self.downloaded += chunk_len
-                                self.calculate_speed()
+                            # 批量更新（每10个块或每100KB更新一次）
+                            if batch_count >= 10 or batch_size >= 102400:
+                                with self.lock:
+                                    self.current_pos += batch_size
+                                    self.downloaded += batch_size
+                                    self.calculate_speed()
+                                batch_size = 0
+                                batch_count = 0
                             
                             # 检查是否完成（仅当有范围限制时）
                             if self.end > 0 and self.current_pos > self.end:
                                 break
+                    
+                    # 处理剩余的批量数据
+                    if batch_size > 0:
+                        with self.lock:
+                            self.current_pos += batch_size
+                            self.downloaded += batch_size
+                            self.calculate_speed()
                 
                 # 下载完成
                 # 对于单线程下载（end=0），当response完成时表示下载完成
                 # 对于多线程下载（end>0），当到达结束位置时表示下载完成
-                if self.end == 0 or self.current_pos >= self.end:
+                if self.end == 0 or self.current_pos > self.end:
                     self.completed = True
                     logging.info(f"线程 {self.thread_id}: 下载完成")
                     break
@@ -249,8 +264,9 @@ class DownloadManager:
         try:
             response = requests.head(self.url, headers=self.headers, timeout=self.config.timeout)
             
-            # 检查是否支持Range请求
-            if 'Accept-Ranges' not in response.headers or response.headers['Accept-Ranges'] == 'none':
+            # 检查是否支持Range请求（使用case-insensitive比较）
+            accept_ranges = response.headers.get('Accept-Ranges', '').lower()
+            if not accept_ranges or accept_ranges == 'none':
                 logging.warning("服务器不支持Range请求，将使用单线程下载")
                 self.config.num_threads = 1
             
@@ -358,7 +374,9 @@ class DownloadManager:
             for thread in self.threads:
                 if not thread.completed and thread.running:
                     # 检查速度是否低于阈值
-                    if thread.speed < self.config.speed_threshold and thread.downloaded > 0:
+                    # 允许线程有一定时间建立连接，但之后必须达到速度要求
+                    elapsed_time = time.time() - thread.last_check_time
+                    if thread.speed < self.config.speed_threshold and elapsed_time > 10:
                         thread.restart()
             
             # 保存状态
