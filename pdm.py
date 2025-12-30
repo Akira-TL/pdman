@@ -12,6 +12,7 @@ from glob import glob
 import hashlib
 import json
 import os, aiofiles
+import time
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,12 @@ import requests
 from rich.progress import (
     Progress,
     Console,
+    BarColumn,
+    DownloadColumn,
+    TransferSpeedColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+    TextColumn,
 )
 from rich.text import Text
 
@@ -75,7 +82,16 @@ class PDManager:
         self.dict_lock = asyncio.Lock()
         self.urls: dict[dict] = (
             {}
-        )  # url: {md5: str, filename: str,dir_path: str,log_path: str,url_header: dict,file_size: int,...}
+        )  # url: {md5: str, filename: str,dir_path: str,tmp_path: str}
+        self.progress = Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            DownloadColumn(binary_units=True),
+            TransferSpeedColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        )
 
     def parse_size(self, size_str: str) -> int:
         size_str = str(size_str).strip().upper()
@@ -107,6 +123,7 @@ class PDManager:
             self.chunk_root: "PDManager.FileDownloader.Chunk" | None = None
             self.lock = asyncio.Lock()
             self.header_info = None
+            # self.task = self.parent.progress.add_task(description=self.url)
 
         def __str__(self):
             chunks = []
@@ -247,23 +264,27 @@ class PDManager:
 
         async def create_chunk(self) -> "PDManager.FileDownloader.Chunk" | None:
             # 遍历chunk列表，先找到间隔最大的正在下载的chunk，然后在其间隙中创建新的chunk，间隔小于102400则返回None
-            max_gap = 0
-            target_chunk: "PDManager.FileDownloader.Chunk" = None
-            for chunk in self.chunk_root:
-                gap = chunk.end - chunk.size - chunk.start + 1
-                if gap > max_gap:
-                    max_gap = gap
-                    target_chunk = chunk
-            if target_chunk is None or max_gap < 10240:
-                return None
-            new_start = (
-                target_chunk.start
-                + target_chunk.size
-                + (target_chunk.next.start if target_chunk.next else target_chunk.end)
-            ) // 2
-            if new_start // 10240:
-                new_start -= new_start % 10240
             async with self.lock:
+                max_gap = 0
+                target_chunk: "PDManager.FileDownloader.Chunk" = None
+                for chunk in self.chunk_root:
+                    gap = chunk.end - chunk.size - chunk.start + 1
+                    if gap > max_gap:
+                        max_gap = gap
+                        target_chunk = chunk
+                if target_chunk is None or max_gap <= 10240:
+                    return None
+                new_start = (
+                    target_chunk.start
+                    + target_chunk.size
+                    + (
+                        target_chunk.next.start
+                        if target_chunk.next
+                        else target_chunk.end
+                    )
+                ) // 2
+                if new_start // 10240:
+                    new_start -= new_start % 10240
                 new_chunk = PDManager.FileDownloader.Chunk(
                     self,
                     new_start,
@@ -328,13 +349,13 @@ class PDManager:
             # 清理临时文件
             shutil.rmtree(self.pdm_tmp, ignore_errors=True)
 
-        def start_download(self):
-            self.md5 = asyncio.run(self.process_md5(self.md5))
+        async def start_download(self):
+            self.md5 = await self.process_md5(self.md5)
             self.filename = (
-                self.filename if self.filename else asyncio.run(self.get_file_name())
+                self.filename if self.filename else await self.get_file_name()
             )
             os.makedirs(self.filepath, exist_ok=True)
-            self.file_size = self.file_size or asyncio.run(self.get_url_file_size())
+            self.file_size = self.file_size or await self.get_url_file_size()
             sha = hashlib.sha256(self.url.encode("utf-8")).hexdigest()[:6]
             if self.pdm_tmp is None:
                 self.pdm_tmp = os.path.join(self.filepath, f".pdm.{sha}")
@@ -342,15 +363,30 @@ class PDManager:
                 self.pdm_tmp = os.path.join(self.pdm_tmp, f".pdm.{sha}")
             os.makedirs(self.pdm_tmp, exist_ok=True)
             self.creat_info()
-            self.chunk_root = asyncio.run(self.rebuild_task())
+            self.chunk_root = await self.rebuild_task()
             if self.chunk_root is None:
-                self.chunk_root = asyncio.run(self.build_task())
-            asyncio.run(self._start_download())
+                self.chunk_root = await self.build_task()
+            # self.parent.progress.update(
+            #     self.task, total=self.file_size, visible=True, advance=0
+            # )
+            await self._start_download()
             self.merge_chunks()
+            self.parent.urls.pop(self.url)
 
         async def _start_download(self):
-            sem = asyncio.Semaphore(self.parent.max_concurrent_downloads)
             tasks = []
+
+            async def progress_run():
+                task = self.parent.progress.add_task(
+                    f"Downloading {self.filename}", total=self.file_size
+                )  # TODO
+                while self.file_size > sum(self.chunk_root):
+                    self.parent.progress.update(task, completed=sum(self.chunk_root))
+                    await asyncio.sleep(1)
+                self.parent.progress.remove_task(task)
+                logger.info(f"Completed downloading {self.filename}")
+
+            progress_task = asyncio.create_task(progress_run())
 
             for chunk in self.chunk_root:
                 if tasks.__len__() < self.parent.max_concurrent_downloads:
@@ -417,8 +453,20 @@ class PDManager:
             def __str__(self):
                 return f"Chunk(start={self.start}, end={self.end},target size={(self.end - self.start + 1) if self.end is not None else -1}, size={self.size}, , chunk_path={self.chunk_path})"
 
+            # 支持使用sum、+、-等
+            def __add__(self, other):
+                if not isinstance(other, PDManager.FileDownloader.Chunk):
+                    return NotImplemented
+                return self.size + other.size
+
+            def __radd__(self, other):
+                if other == 0:
+                    return self.size
+                if not isinstance(other, int):
+                    return NotImplemented
+                return self.size + other
+
             async def download(self):
-                debug_flug = 0
                 assert self.end is not None or self.size >= 0
                 headers = {}
                 # 复用会话
@@ -464,13 +512,10 @@ class PDManager:
                                                 await f.write(data)
                                                 async with self.parent.lock:
                                                     self.size += len(data)
-                                                if debug_flug < 10:
-                                                    debug_flug += 1
-                                                else:
-                                                    debug_flug = 0
-                                                    logger.debug(
-                                                        f"real size={await f.tell()}, chunk size={self.size}, target size={(self.end - self.start + 1)}"
-                                                    )
+                                                    # self.parent.parent.progress.update(
+                                                    #     self.parent.task,
+                                                    #     advance=len(data),
+                                                    # )
                                                 pos += len(data)
                             except aiohttp.client_exceptions.ClientPayloadError as e:
                                 await asyncio.sleep(1)
@@ -498,6 +543,21 @@ class PDManager:
                             self.next = new_chunk
                 return self
 
+    def add_url_list(self, url_list: list[dict]):
+        if url_list:
+            if type(url_list[0]) == dict:
+                for d in url_list:
+                    self.add_url(
+                        d.get("url"),
+                        md5=d.get("md5"),
+                        file_name=d.get("filename"),
+                        dir_path=d.get("dir_path", os.getcwd()),
+                        log_path=d.get("log_path", os.getcwd()),
+                    )
+            else:
+                for url in url_list:
+                    self.add_url(url)
+
     def add_url(
         self,
         url: str,
@@ -516,28 +576,73 @@ class PDManager:
     def del_url(self, url: str):
         self.urls.pop(url, None)
 
-    async def download(self, url: str):  # 单个文件的下载逻辑
-        if url not in self.urls:
-            logger.warning(f"URL not found in download list, adding it: {url}")
-            self.add_url(url)
+    async def start_download(self):
+        downloaders = []
+        self.progress.start()
+        while self.urls:
+            for url, info in self.urls.items():
+                if len(downloaders) < self.workers:
+                    downloaders.append(
+                        asyncio.create_task(
+                            PDManager.FileDownloader(
+                                self,
+                                url,
+                                info.get("dir_path"),
+                                info.get("filename"),
+                                info.get("md5"),
+                                info.get("tmp_path"),
+                            ).start_download()
+                        )
+                    )
+                else:
+                    done, pending = await asyncio.wait(
+                        downloaders, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for d in done:
+                        try:
+                            _ = d.result()
+                        except asyncio.CancelledError:
+                            # 根据需要处理取消
+                            pass
+                        except Exception as exc:
+                            print(f"任务异常: {exc}")  # 或使用 logging 记录
+                        downloaders.remove(d)
+                    downloaders.append(
+                        asyncio.create_task(
+                            PDManager.FileDownloader(
+                                self,
+                                url,
+                                info.get("dir_path"),
+                                info.get("filename"),
+                                info.get("md5"),
+                                info.get("tmp_path"),
+                            ).start_download()
+                        )
+                    )
+            await asyncio.gather(*downloaders)
+        self.progress.stop()
 
 
 if __name__ == "__main__":
     url = "https://ftp-trace.ncbi.nlm.nih.gov/sra/sdk/3.3.0/sratoolkit.3.3.0-ubuntu64.tar.gz"
 
-    fd = PDManager.FileDownloader(
-        PDManager(max_concurrent_downloads=1, continue_download=True),
-        url=url,
-        filepath=os.getcwd(),
-        filename=None,
-        md5=None,
-        pdm_tmp=None,
-    )
+    # fd = PDManager.FileDownloader(
+    #     PDManager(max_concurrent_downloads=1, continue_download=True),
+    #     url=url,
+    #     filepath=os.getcwd(),
+    #     filename=None,
+    #     md5=None,
+    #     pdm_tmp=None,
+    # )
 
-    fd.start_download()
+    # fd.start_download()
+    pdm = PDManager(max_concurrent_downloads=32, continue_download=True)
+    pdm.add_url_list([url])
+    asyncio.run(pdm.start_download())
     # with Progress(console=console) as progress:
     #     task1 = progress.add_task("[red]Downloading...", total=100)
     #     for i in range(100):
     #         progress.update(task1, advance=1)
     #         import time
+
     #         time.sleep(0.1)
