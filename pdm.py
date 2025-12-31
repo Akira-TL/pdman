@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-"""
+version = "0.1.1"
+f"""
 @文件    :pdm.py
 @说明    :模拟IDM下载方式的PDM下载器，命令行脚本
 @时间    :2025/12/27 11:06:03
 @作者    :Akira_TL
-@版本    :1.0
+@版本    :{version}
 """
 
 import argparse
@@ -17,9 +18,10 @@ import time
 import shutil
 import subprocess
 import sys
-from typing import List, Optional
+from typing import List, Optional, TextIO
 import aiohttp
-from loguru import logger
+from loguru._logger import Logger, Core
+
 from multidict import CIMultiDictProxy
 import requests
 from rich.progress import (
@@ -39,6 +41,18 @@ from yarl import URL
 import re
 import asyncio
 
+logger = Logger(
+    core=Core(),
+    exception=None,
+    depth=0,
+    record=False,
+    lazy=False,
+    colors=False,
+    raw=False,
+    capture=True,
+    patchers=[],
+    extra={},
+)
 logger.remove()
 logger.add(
     lambda msg: console.print(Text.from_ansi(str(msg)), end="\n"),
@@ -55,9 +69,9 @@ class PDManager:
         threads: int = 4,
         timeout: int = 10,
         retry: int = 3,
-        log_path: str = sys.stdout,
+        log_path: str | TextIO = sys.stdout,
+        debug: bool = False,
         split: int = 5,
-        file_allocation: str = "prealloc",
         #  check_integrity:bool=False,
         continue_download: bool = False,
         input_file: str = None,
@@ -68,17 +82,29 @@ class PDManager:
         self.timeout = timeout
         self.retry = retry
         self.log_path = log_path
+        self._logger = Logger(
+            core=Core(),
+            exception=None,
+            depth=0,
+            record=False,
+            lazy=False,
+            colors=False,
+            raw=False,
+            capture=True,
+            patchers=[],
+            extra={},
+        )
+        self.debug = debug
         self.split = split
-        self.file_allocation = file_allocation
         # self.check_integrity = check_integrity
         self.continue_download = continue_download
         self.input_file = input_file
-        self.max_concurrent_downloads = min(32, max(1, max_concurrent_downloads))
-        self.min_split_size = self.parse_size(min_split_size)
+        self.max_concurrent_downloads = max_concurrent_downloads
+        self.min_split_size = min_split_size
 
-        self.dict_lock = asyncio.Lock()
-        self.urls: dict = {}  # url:FileDownloader
-        self.progress = Progress(
+        self._dict_lock = asyncio.Lock()
+        self._urls: dict = {}  # url:FileDownloader
+        self._progress = Progress(
             TextColumn("[bold blue]{task.description}"),
             BarColumn(),
             DownloadColumn(binary_units=True),
@@ -87,6 +113,47 @@ class PDManager:
             TimeRemainingColumn(),
             console=console,
         )
+        self.parse_config()
+
+    def config(self, **kwargs):  # 动态配置参数
+        for k, v in kwargs.items():
+            if hasattr(self, k) and k not in [
+                "_urls",
+                "_progress",
+                "_logger",
+                "_dict_lock",
+            ]:
+                setattr(self, k, v)
+        self.parse_config()
+
+    def parse_config(self):
+        self._logger.remove()
+        self._logger.add(
+            lambda msg: console.print(Text.from_ansi(str(msg)), end="\n"),
+            level="DEBUG" if self.debug else "INFO",
+            diagnose=True,
+            colorize=True,
+            format="<g>{time:MM-DD HH:mm:ss}</g> [<lvl>{level}</lvl>] <c><u>{name}</u></c> | {message}",
+        )
+        if isinstance(self.log_path, str):
+            self._logger.add(
+                self.log_path,
+                level="INFO" if not self.debug else "DEBUG",
+                diagnose=True,
+                colorize=True,
+                format="<g>{time:MM-DD HH:mm:ss}</g> [<lvl>{level}</lvl>] <c><u>{name}</u></c> | {message}",
+            )
+        if self.max_concurrent_downloads < 1:
+            self.max_concurrent_downloads = 1
+            self._logger.warning(
+                "max_concurrent_downloads cannot be less than 1. Setting to 1."
+            )
+        elif self.max_concurrent_downloads > 32:
+            self.max_concurrent_downloads = 32
+            self._logger.warning(
+                "max_concurrent_downloads cannot be more than 32. Setting to 32."
+            )
+        self.min_split_size = self.parse_size(self.min_split_size)
 
     def parse_size(self, size_str: str) -> int:
         size_str = str(size_str).strip().upper()
@@ -383,19 +450,19 @@ class PDManager:
             # )
             await self._start_download()
             self.merge_chunks()
-            self.parent.urls.pop(self.url)
+            return self.url
 
         async def _start_download(self):
             tasks = []
 
             async def progress_run():
-                task = self.parent.progress.add_task(
+                task = self.parent._progress.add_task(
                     f"Downloading {self.filename}", total=self.file_size
                 )  # TODO
                 while self.file_size > sum(self.chunk_root):
-                    self.parent.progress.update(task, completed=sum(self.chunk_root))
+                    self.parent._progress.update(task, completed=sum(self.chunk_root))
                     await asyncio.sleep(1)
-                self.parent.progress.remove_task(task)
+                self.parent._progress.remove_task(task)
                 logger.info(f"Completed downloading {self.filename}")
 
             progress_task = asyncio.create_task(progress_run())
@@ -578,41 +645,56 @@ class PDManager:
         dir_path: str = os.getcwd(),
         log_path: str = os.getcwd(),
     ):
-        self.urls[url] = PDManager.FileDownloader(
+        self._urls[url] = PDManager.FileDownloader(
             self, url, dir_path, filename=file_name, md5=md5, log_path=log_path
         )
+        self._logger.debug(f"Added URL: {url}")
 
     def pop(self, url: str):
-        self.urls.pop(url, None)
+        self._urls.pop(url, None)
+        self._logger.debug(f"Removed URL: {url}")
 
     async def start_download(self):
+        logger.debug(self)
         downloaders = []
-        self.progress.start()
-        while self.urls:
-            for url, download_entity in self.urls.items():
-                assert isinstance(download_entity, PDManager.FileDownloader)
-                if len(downloaders) < self.threads:
-                    downloaders.append(
-                        asyncio.create_task(download_entity.start_download())
-                    )
-                else:
-                    done, pending = await asyncio.wait(
-                        downloaders, return_when=asyncio.FIRST_COMPLETED
-                    )
-                    for d in done:
-                        try:
-                            _ = d.result()
-                        except asyncio.CancelledError:
-                            # 根据需要处理取消
-                            pass
-                        except Exception as exc:
-                            print(f"任务异常: {exc}")  # 或使用 logging 记录
-                        downloaders.remove(d)
-                    downloaders.append(
-                        asyncio.create_task(download_entity.start_download())
-                    )
-            await asyncio.gather(*downloaders)
-        self.progress.stop()
+        with self._progress:
+
+            async def wait(downloaders: list[asyncio.Task]):
+                done, pending = await asyncio.wait(
+                    downloaders, return_when=asyncio.FIRST_COMPLETED
+                )
+                for d in done:
+                    try:
+                        _url = d.result()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        self._logger.warning(f"task error: {e}")
+                    downloaders.remove(d)
+                    self.pop(_url)
+
+            while self._urls:
+                for url, download_entity in self._urls.items():
+                    assert isinstance(download_entity, PDManager.FileDownloader)
+                    if len(downloaders) < self.threads:
+                        downloaders.append(
+                            asyncio.create_task(download_entity.start_download())
+                        )
+                    else:
+                        await wait(downloaders)
+                        downloaders.append(
+                            asyncio.create_task(download_entity.start_download())
+                        )
+                    self._logger.debug(f"Starting download for {url}")
+                # await asyncio.gather(*downloaders)
+                while downloaders:
+                    await wait(downloaders)
+
+    def urls(self) -> List[str]:
+        return list(self._urls.keys())
+
+    def __str__(self):
+        return f"PDManager(threads={self.threads}, timeout={self.timeout}, retry={self.retry}, debug={self.debug}, split={self.split}, continue_download={self.continue_download}, input_file={self.input_file}, max_concurrent_downloads={self.max_concurrent_downloads}, min_split_size={self.min_split_size})"
 
 
 if __name__ == "__main__":
@@ -621,15 +703,20 @@ if __name__ == "__main__":
         "-v",
         "--version",
         action="version",
-        version="pdm version 0.1.0",
+        version="pdm version 0.1.1",
         help="Print the version number and exit.",
     )
     parser.add_argument(
         "-l",
         "--log",
         type=str,
-        default=os.path.join(os.getcwd(), "pdm", "pdm.log"),
+        default=sys.stdout,
         help="The file name of the log file. If '-' is specified, log is written to stdout.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with verbose logging.",
     )
     parser.add_argument(
         "-d",
@@ -714,12 +801,19 @@ if __name__ == "__main__":
     )  # 可以接受多个url参数
 
     args = parser.parse_args()
+    if args.version:
+        print(f"pdm version {version}")
+        sys.exit(0)
+    if args.log == "-":
+        args.log = sys.stdout
     # url = "https://ftp-trace.ncbi.nlm.nih.gov/sra/sdk/3.3.0/sratoolkit.3.3.0-ubuntu64.tar.gz"
     # pdm = PDManager(max_concurrent_downloads=32, continue_download=True)
     # pdm.add_url_list([url])
     # asyncio.run(pdm.start_download())
     pdm = PDManager(
         threads=args.threads,
+        log_path=args.log,
+        debug=args.debug,
         split=args.split,
         continue_download=args.continue_download,
         input_file=args.input_file,
