@@ -69,6 +69,7 @@ python pdm.py --input-file urls.txt --max-concurrent-downloads 3 --threads 16
 - [x] 进度展示
 - [x] 异步网络栈依赖
 - [x] 多线程/多段下载的参数设计
+- [ ] 下载任务较多情况下多进程下载处理
 - [ ] 自定义 UA 与通用 Headers 的 CLI 支持与请求集成
 - [ ] 下载限速
 - [ ] 不可续传链接降级策略与恢复逻辑

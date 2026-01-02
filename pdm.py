@@ -52,10 +52,11 @@ class PDManager:
         continue_download: bool = False,
         input_file: str = None,
         max_concurrent_downloads: int = 5,
-        min_split_size: str = "20M",
+        min_split_size: str = "1M",
         force_sequential: bool = False,
         tmp_dir: str = None,
-        min_split_size_bytes: int | str = "10k",
+        user_agent: dict = None,
+        chunk_retry_speed: str | int = -1,
     ):
         self.threads = threads
         self.timeout = timeout
@@ -80,6 +81,9 @@ class PDManager:
         self.min_split_size = min_split_size
         self.force_sequential = force_sequential
         self.tmp_dir = tmp_dir
+        self.user_agent = user_agent  # or {"User-Agent": "PDM-Downloader/1.0"}
+        self.check_integrity = check_integrity
+        self.chunk_retry_speed = chunk_retry_speed
 
         self._dict_lock = asyncio.Lock()
         self._urls: dict = {}  # url:FileDownloader
@@ -129,11 +133,11 @@ class PDManager:
                 "max_concurrent_downloads cannot be less than 1. Setting to 1."
             )
         elif self.max_concurrent_downloads > 32:
-            self.max_concurrent_downloads = 32
             self._logger.warning(
-                "max_concurrent_downloads cannot be more than 32. Setting to 32."
+                "max_concurrent_downloads is more than 32, becareful of server limits. "
             )
         self.min_split_size = self.parse_size(self.min_split_size)
+        self.chunk_retry_speed = self.parse_size(self.chunk_retry_speed)
         if self.force_sequential:
             self.max_concurrent_downloads = 1
             self._logger.info("Force sequential download enabled.")
@@ -141,9 +145,10 @@ class PDManager:
         if self.threads < 1:
             self.threads = 1
             self._logger.warning("threads cannot be less than 1. Setting to 1.")
-        elif self.threads > 64:
-            self.threads = 64
-            self._logger.warning("threads cannot be more than 64. Setting to 64.")
+        elif self.threads > 32:
+            self._logger.warning(
+                "threads are more than 32, may cause high resource usage. "
+            )
 
     def parse_size(self, size_str: str) -> int:
         size_str = str(size_str).strip().upper()
@@ -183,6 +188,7 @@ class PDManager:
             self.lock = asyncio.Lock()
             self.header_info = None
             self.log_path = log_path
+            self._done = False
             self._logger = Logger(
                 core=Core(),
                 exception=None,
@@ -272,7 +278,11 @@ class PDManager:
         async def get_file_name(self) -> str:
             async with aiohttp.ClientSession() as session:
                 if self.header_info is None:
-                    async with session.head(self.url, allow_redirects=True) as response:
+                    async with session.head(
+                        self.url,
+                        allow_redirects=True,
+                        headers={"User-Agent": self.parent.user_agent},
+                    ) as response:
                         self.header_info = response.headers
                 cd = self.header_info.get("Content-Disposition")
                 if cd:
@@ -317,7 +327,7 @@ class PDManager:
             elif chunk_size // 10240:
                 chunk_size -= chunk_size % 10240  # 保证chunk_size是10K的整数倍
             starts = list(range(0, self.file_size, chunk_size))
-            if starts[-1] < self.parent.min_split_size_bytes:
+            if starts[-1] < self.parent.min_split_size:
                 starts.pop()
             root = None
             for i in range(len(starts)):
@@ -388,7 +398,7 @@ class PDManager:
                     if gap > max_gap:
                         max_gap = gap
                         target_chunk = chunk
-                if target_chunk is None or max_gap <= self.parent.min_split_size_bytes:
+                if target_chunk is None or max_gap <= self.parent.min_split_size:
                     return None
                 new_start = (
                     target_chunk.start
@@ -508,12 +518,21 @@ class PDManager:
                     )
                     return False
 
-        async def start_download(self):
-            await self.parse_config()
-            await self._start_download()
-            await self.merge_chunks()
-            await self.check_integrity()
-            return self.url
+        async def start_download(self, _iter=None):
+            if _iter is None:
+                _iter = self.parent.retry
+            try:
+                await self.parse_config()
+                await self._start_download()
+                await self.merge_chunks()
+                await self.check_integrity()
+                self._done = True
+            except Exception as e:
+                await self.start_download(_iter=_iter - 1) if _iter > 0 else None
+            if self._done:
+                return self.url
+            else:
+                raise Exception(f"Failed to download {self.url} after retries.:{e}")
 
         async def _start_download(self):
             tasks = []
@@ -528,7 +547,7 @@ class PDManager:
                 self.parent._progress.remove_task(task)
                 self._logger.info(f"Completed downloading {self.filename}")
 
-            asyncio.create_task(progress_run())
+            self.progress = asyncio.create_task(progress_run())
 
             for chunk in self.chunk_root:
                 if tasks.__len__() < self.parent.max_concurrent_downloads:
@@ -570,6 +589,7 @@ class PDManager:
                     break
                 tasks.append(asyncio.create_task(new_chunk.download()))
             await asyncio.gather(*tasks)
+            await self.progress
 
         class Chunk:
             def __init__(
@@ -599,7 +619,7 @@ class PDManager:
                     current = current.next
 
             def __str__(self):
-                return f"Chunk(start={self.start}, end={self.end},target size={(self.end - self.start + 1) if self.end is not None else -1}, size={self.size}, , chunk_path={self.chunk_path})"
+                return f"Chunk(start={self.start}, end={self.end},target size={(self.end - self.start + 1) if self.end is not None else -1}, size={self.size}, chunk_path={self.chunk_path})"
 
             # 支持使用sum、+、-等
             def __add__(self, other):
@@ -626,72 +646,126 @@ class PDManager:
                         for _ in range(self.parent.parent.retry):
                             # 已完整下载
                             if os.path.exists(self.chunk_path):
-                                if self.size == self.end - self.start + 1:
+                                if (
+                                    self.end is not None
+                                    and self.size == self.end - self.start + 1
+                                ):
                                     return self
-                            try:
-                                # 构造 Range
-                                headers["Range"] = (
-                                    f"bytes={self.start + self.size}-{self.end}"
-                                )
-                                self.parent._logger.debug(
-                                    f"Downloading chunk: {self}, with headers: {headers}"
-                                )
-                                # 仅在未完成时下载
-                                if self.size < self.end - self.start + 1:
-                                    async with session.get(
-                                        self.parent.url, headers=headers
-                                    ) as response:
-                                        if response.status in (200, 206):
-                                            # 若文件已存在，定位到当前末尾
-                                            pos = await f.tell()
-                                            # 限制写入至 chunk.end
-                                            async for (
-                                                data
-                                            ) in response.content.iter_chunked(
-                                                10240
-                                            ):  # 如果数据不足10240字节则直接写入
-                                                if self.end is not None:
-                                                    remaining = (
-                                                        self.end - self.start + 1 - pos
+                            while True:
+                                continue_flug = False
+                                try:
+                                    # 构造 Range（仅当 end 可用时）
+                                    if self.end is not None:
+                                        headers["Range"] = (
+                                            f"bytes={self.start + self.size}-{self.end}"
+                                        )
+                                    else:
+                                        if "Range" in headers:
+                                            headers.pop("Range")
+                                    self.parent._logger.debug(
+                                        f"Downloading chunk: {self}, with headers: {headers}"
+                                    )
+                                    # 仅在未完成时下载（若 end 不可用则一直下载直到流结束）
+                                    need_download = (
+                                        self.end is None
+                                        or self.size < self.end - self.start + 1
+                                    )
+                                    if need_download:
+                                        async with session.get(
+                                            self.parent.url, headers=headers
+                                        ) as response:
+                                            if response.status in (200, 206):
+                                                last_time = time.time()
+                                                # 若文件已存在，定位到当前末尾
+                                                pos = await f.tell()
+                                                # 限制写入至 chunk.end（如果已知）
+                                                async for (
+                                                    data
+                                                ) in response.content.iter_chunked(
+                                                    10240
+                                                ):  # 如果数据不足10240字节则直接写入
+                                                    if self.end is not None:
+                                                        remaining = (
+                                                            self.end
+                                                            - self.start
+                                                            + 1
+                                                            - pos
+                                                        )
+                                                        if remaining <= 0:
+                                                            break
+                                                        data = data[:remaining]
+                                                    await f.write(data)
+                                                    async with self.parent.lock:
+                                                        self.size += len(data)
+                                                        now = time.time()
+                                                        # 计算速率，防止除以0
+                                                        elaps = max(
+                                                            now - last_time, 1e-6
+                                                        )
+                                                        speed = len(data) / elaps
+                                                        # 如果速度低于阈值，则重启本片段下载
+                                                        if (
+                                                            speed
+                                                            < self.parent.parent.chunk_retry_speed
+                                                        ):
+                                                            continue_flug = True
+                                                        last_time = now
+                                                        # self.parent.parent.progress.update(
+                                                        #     self.parent.task,
+                                                        #     advance=len(data),
+                                                        # )
+                                                    pos += len(data)
+                                                if continue_flug:
+                                                    self.parent._logger.debug(
+                                                        "speed is low restarting..."
                                                     )
-                                                    if remaining <= 0:
-                                                        break
-                                                    data = data[:remaining]
-                                                await f.write(data)
-                                                async with self.parent.lock:
-                                                    self.size += len(data)
-                                                    # self.parent.parent.progress.update(
-                                                    #     self.parent.task,
-                                                    #     advance=len(data),
-                                                    # )
-                                                pos += len(data)
-                            except aiohttp.client_exceptions.ClientPayloadError as e:
-                                await asyncio.sleep(1)
-                            except Exception as e:
-                                self.parent._logger.error(
-                                    f"Error downloading chunk {self}: {e}"
+                                                    break
+                                except (
+                                    aiohttp.client_exceptions.ClientPayloadError
+                                ) as e:
+                                    await asyncio.sleep(1)
+                                except Exception as e:
+                                    self.parent._logger.error(
+                                        f"Error downloading chunk {self}: {e}"
+                                    )
+                                    await asyncio.sleep(1)
+                                    break
+                                if (
+                                    self.end is not None
+                                    and self.size == self.end - self.start + 1
+                                ):
+                                    return self
+                            if self.end is None:
+                                # 如果没有明确的 end，且循环结束则视为完成
+                                self.parent._logger.debug(
+                                    f"completed download chunk (unknown size): {self}"
                                 )
-                                await asyncio.sleep(1)
-                            self.parent._logger.debug(
-                                f"retrying download chunk: {self}"
-                            )
-                    if self.size != self.end - self.start + 1:
-                        self.parent._logger.debug(
+                            elif self.size < self.end - self.start + 1:
+                                self.parent._logger.debug(
+                                    f"retrying download chunk: {self}"
+                                )
+                            else:
+                                self.parent._logger.debug(
+                                    f"completed download chunk: {self}"
+                                )
+                    if self.end is None or self.size != self.end - self.start + 1:
+                        self.parent._logger.warning(
                             f"Chunk not fully downloaded, splitting chunk: {self}"
                         )
                         async with self.parent.lock:
+                            new_start = self.start + self.size
                             new_chunk = PDManager.FileDownloader.Chunk(
                                 self.parent,
-                                self.start + self.size,
+                                new_start,
                                 self.end,
                                 os.path.join(
                                     self.parent.pdm_tmp,
-                                    f"{self.parent.filename}.{self.start}",
+                                    f"{self.parent.filename}.{new_start}",
                                 ),
                                 self,
                                 next=self.next,
                             )
-                            self.end = self.start + self.size - 1
+                            self.end = new_start - 1
                             self.next = new_chunk
                 return self
 
@@ -742,41 +816,45 @@ class PDManager:
         self._urls.pop(url, None)
         self._logger.debug(f"Removed URL: {url}")
 
+    async def wait(self, downloaders: list[asyncio.Task]):
+        done, pending = await asyncio.wait(
+            downloaders, return_when=asyncio.FIRST_COMPLETED
+        )
+        for d in done:
+            try:
+                _url = d.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self._logger.warning(f"task error: {e}")
+            downloaders.remove(d)
+            self.pop(_url)
+
     async def start_download(self):
         self._logger.debug(self)
         downloaders = []
+        downloading = {}
         with self._progress:
 
-            async def wait(downloaders: list[asyncio.Task]):
-                done, pending = await asyncio.wait(
-                    downloaders, return_when=asyncio.FIRST_COMPLETED
-                )
-                for d in done:
-                    try:
-                        _url = d.result()
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception as e:
-                        self._logger.warning(f"task error: {e}")
-                    downloaders.remove(d)
-                    self.pop(_url)
-
-            while self._urls:
+            while self._urls:  # 如果在下载过程中添加了任务
                 for url, download_entity in self._urls.items():
+                    if url in downloading:
+                        continue
+                    downloading[url] = True
                     assert isinstance(download_entity, PDManager.FileDownloader)
                     if len(downloaders) < self.threads:
                         downloaders.append(
                             asyncio.create_task(download_entity.start_download())
                         )
                     else:
-                        await wait(downloaders)
+                        await self.wait(downloaders)
                         downloaders.append(
                             asyncio.create_task(download_entity.start_download())
                         )
                     self._logger.debug(f"Starting download for {url}")
                 # await asyncio.gather(*downloaders)
-                while downloaders:
-                    await wait(downloaders)
+                await self.wait(downloaders)
+                await asyncio.sleep(1)
 
     def urls(self) -> List[str]:
         return list(self._urls.keys())
@@ -849,6 +927,20 @@ if __name__ == "__main__":
         default=5,
         help="Set maximum number of parallel downloads for each URL or task.",
     )
+    # 单个下载的子线程下载最小速度限制，低于限制重启下载线程,需要和单个下载的速率限制区分
+    parser.add_argument(
+        "--chunk-retry-speed",
+        type=str,
+        default=-1,
+        help="If the download speed of a chunk falls below SIZE bytes/second, pdm will restart downloading that chunk (Excluded from retry). You can append K or M (1K = 1024, 1M = 1024K).",
+    )
+    parser.add_argument(
+        "-r",
+        "--retry",
+        type=int,
+        default=3,
+        help="Number of times to retry downloading a URL upon failure.",
+    )
     parser.add_argument(
         "-Z",
         "--force-sequential",
@@ -859,7 +951,7 @@ if __name__ == "__main__":
         "-k",
         "--min-split-size",
         type=str,
-        default="20M",
+        default="1M",
         help="pdm will not split ranges smaller than 2*SIZE bytes. For example, for a 20MiB file: if SIZE is 10M, pdm can split into two ranges and use 2 sources (if --split >= 2). If SIZE is 15M, since 2*15M > 20MiB, pdm will not split the file and downloads using 1 source. You can append K or M (1K = 1024, 1M = 1024K).",
     )
     parser.add_argument(
@@ -874,6 +966,13 @@ if __name__ == "__main__":
         type=int,
         default=4,
         help="The number of threads to use for downloading.",
+    )
+    parser.add_argument(
+        "-ua",
+        "--user-agent",
+        type=str,
+        default="PDM-Downloader/1.0",
+        help="The User-Agent string to use for HTTP requests.",
     )
     parser.add_argument(
         "urls",
@@ -903,7 +1002,9 @@ if __name__ == "__main__":
         force_sequential=args.force_sequential,
         tmp_dir=args.tmp,
         check_integrity=args.check_integrity,
-        min_split_size_bytes=args.min_split_size,
+        user_agent=args.user_agent,
+        chunk_retry_speed=args.chunk_retry_speed,
+        retry=args.retry,
     )
     if args.urls:
         pdm.add_urls(
