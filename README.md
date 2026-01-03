@@ -98,7 +98,7 @@ python pdm.py -i urls.txt
 
 JSON 结构为「URL 作为键，对应配置作为值」：
 
-````json
+```json
 {
   "https://example.com/a.iso": {
     "file_name": "linux.iso",
@@ -111,11 +111,11 @@ JSON 结构为「URL 作为键，对应配置作为值」：
     "md5": "https://example.com/b.zip.md5"
   }
 }
-``;
+```
 
 ```bash
 python pdm.py -i tasks.json
-````
+```
 
 字段说明：
 
