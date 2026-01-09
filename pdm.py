@@ -547,16 +547,17 @@ class PDManager:
                     return False
 
         async def start_download(self, _iter=None):
-            if (
-                self.filename is not None
-                and os.path.exists(os.path.join(self.filepath, self.filename))
-                and self.parent.auto_file_renaming
-            ):
-                return self.url
             if _iter is None:
                 _iter = self.parent.retry
             try:
                 await self.parse_config()
+                if (
+                    self.filename is not None
+                    and os.path.exists(os.path.join(self.filepath, self.filename))
+                    and not self.parent.auto_file_renaming
+                ):
+                    self.parent.pop(self.url)
+                    return self.url
                 await self._start_download()
                 await self.merge_chunks()
                 await self.check_integrity()
@@ -722,7 +723,7 @@ class PDManager:
                                     async with session.get(
                                         self.parent.url,
                                         headers=headers,
-                                        timeout=self.parent.parent.chunk_timeout,
+                                        # timeout=self.parent.parent.chunk_timeout, # TODO 实现超时逻辑，避免频繁超时
                                     ) as response:
                                         if response.status in (200, 206):
                                             last_time = time.time()
@@ -751,7 +752,6 @@ class PDManager:
                                                     # 如果速度低于阈值，则重启本片段下载
                                                     if (
                                                         self.parent.parent.chunk_retry_speed
-                                                        is not None
                                                         and speed
                                                         < self.parent.parent.chunk_retry_speed
                                                     ):
@@ -1015,8 +1015,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--auto-file-renaming",
-        type=bool,
-        default=True,
+        action="store_false",
         help="Automatically rename the output file if a file with the same name already exists in the target directory.",
     )
     parser.add_argument(
