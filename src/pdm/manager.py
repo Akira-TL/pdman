@@ -311,7 +311,7 @@ class PDManager:
             self.md5 = md5
             self.pdm_tmp = pdm_tmp
             self.file_size: int = 0
-            self.chunk_root: "PDManager.FileDownloader.Chunk" | None = None
+            self.chunk_root: Optional["PDManager.FileDownloader.Chunk"] | None = None
             self.lock = asyncio.Lock()
             self.header_info = None
             self.log_path = log_path
@@ -518,10 +518,12 @@ class PDManager:
                 cur = cur.next
             return root
 
-        async def create_chunk(self) -> "PDManager.FileDownloader.Chunk" | None:
+        async def create_chunk(
+            self,
+        ) -> Optional["PDManager.FileDownloader.Chunk"] | None:
             async with self.lock:
                 max_gap = 0
-                target_chunk: "PDManager.FileDownloader.Chunk" = None
+                target_chunk: Optional["PDManager.FileDownloader.Chunk"] = None
                 for chunk in self.chunk_root:
                     gap = chunk.end - chunk.size - chunk.start + 1
                     if gap > max_gap:
@@ -748,12 +750,12 @@ class PDManager:
         class Chunk:
             def __init__(
                 self,
-                parent: PDManager.FileDownloader,
+                parent: Optional["PDManager.FileDownloader"],
                 start: int,
                 end: int,
                 chunk_path: str,
-                forward: "PDManager.FileDownloader.Chunk" = None,
-                next: "PDManager.FileDownloader.Chunk" = None,
+                forward: Optional["PDManager.FileDownloader.Chunk"] = None,
+                next: Optional["PDManager.FileDownloader.Chunk"] = None,
             ):
                 self.parent = parent
                 self.start = start
@@ -763,8 +765,8 @@ class PDManager:
                     self.size = os.path.getsize(chunk_path)
                 else:
                     self.size = 0
-                self.forward: "PDManager.FileDownloader.Chunk" = forward
-                self.next: "PDManager.FileDownloader.Chunk" = next
+                self.forward: Optional["PDManager.FileDownloader.Chunk"] = forward
+                self.next: Optional["PDManager.FileDownloader.Chunk"] = next
 
             def __iter__(self):
                 current = self
