@@ -60,6 +60,7 @@ class PDManager:
         chunk_retry_speed: str | int = None,
         chunk_timeout: int = 10,
         auto_file_renaming: bool = True,
+        out_dir: str = None,
         # threads
     ):
         self.max_downloads = max_downloads
@@ -90,6 +91,7 @@ class PDManager:
         self.chunk_retry_speed = chunk_retry_speed
         self.retry_wait = retry_wait
         self.auto_file_renaming = auto_file_renaming
+        self.out_dir = out_dir
 
         self._dict_lock = asyncio.Lock()
         self._urls: dict = {}  # url:FileDownloader
@@ -823,12 +825,14 @@ class PDManager:
                     url,
                     md5=v.get("md5"),
                     file_name=v.get("file_name"),
-                    dir_path=v.get("dir_path", os.getcwd()),
+                    dir_path=v.get(
+                        "dir_path", self.out_dir if self.out_dir else os.getcwd()
+                    ),
                     log_path=v.get("log_path", None),
                 )
         else:
             for url in url_list:
-                self.append(url)
+                self.append(url, dir_path=self.out_dir if self.out_dir else os.getcwd())
 
     def load_input_file(self, input_file: str):
         with open(input_file, "r") as f:
@@ -1014,9 +1018,9 @@ if __name__ == "__main__":
         help="The maximum number of concurrent downloads.",
     )
     parser.add_argument(
-        "--auto-file-renaming",
+        "--no-auto-file-renaming",
         action="store_false",
-        help="Automatically rename the output file if a file with the same name already exists in the target directory.",
+        help="Disable automatically renaming the output file if a file with the same name already exists in the target directory.",
     )
     parser.add_argument(
         "-Z",
@@ -1084,9 +1088,19 @@ if __name__ == "__main__":
         retry_wait=args.retry_wait,
         timeout=args.timeout,
         chunk_timeout=args.chunk_timeout,
-        auto_file_renaming=args.auto_file_renaming,
+        auto_file_renaming=args.no_auto_file_renaming,
+        out_dir=args.dir,
     )
-    if args.urls:
+    if len(args.urls) == 1 and args.out is not None:
+        pdm.append(
+            args.urls[0],
+            file_name=args.out,
+        )
+    else:
+        if args.out is not None:
+            Warning(
+                "The --out option is only valid when downloading a single URL. Ignoring the --out option."
+            )
         pdm.add_urls(
             args.urls,
         )
