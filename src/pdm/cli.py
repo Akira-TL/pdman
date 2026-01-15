@@ -200,7 +200,7 @@ def main(argv=None):
             if os.path.exists(file):
                 pdm.load_input_file(file)
 
-    asyncio.run(pdm.start_download())
+    asyncio.run(pdm.download())
 
 
 if __name__ == "__main__":

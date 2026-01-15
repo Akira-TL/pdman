@@ -108,6 +108,8 @@ class PDManager:
             TimeRemainingColumn(),
             console=self._console,
         )
+        self._downloader_main = None
+        self._downloaders = []
         self.parse_config()
 
     def config(self, **kwargs):
@@ -241,14 +243,17 @@ class PDManager:
             self._logger.debug(f"Added URL: {url}")
 
     def pop(self, url: str):
-        asyncio.run(self.apop(url))
+        return asyncio.run(self.apop(url))
 
     async def apop(self, url: str):
         async with self._urls_lock:
-            self._urls.pop(url, None)
+            result = self._urls.pop(url, None)
         self._logger.debug(f"Removed URL: {url}")
+        return result
 
-    async def wait(self, downloaders: list[asyncio.Task]):
+    async def wait(self, downloaders: list[asyncio.Task] = None):
+        if downloaders is None:
+            downloaders = self._downloaders
         done, pending = await asyncio.wait(
             downloaders, return_when=asyncio.FIRST_COMPLETED
         )
@@ -262,38 +267,94 @@ class PDManager:
                 self._logger.error(traceback.format_exc())
             downloaders.remove(d)
 
-    async def start_download(self):
+    async def download(self):
+        self._downloader_main = asyncio.create_task(self._start_download())
+
+    async def _download_once(self):
         self._logger.debug(self)
-        downloaders = []
+        self._downloaders = []
         downloading = {}
-        with self._progress:
-            while downloaders or self._urls:
-                for (
-                    url,
-                    download_entity,
-                ) in self._urls.items():  # TODO self._urls被修改会报错，改成队列
+        if self._urls:
+            with self._progress:
+                while self._downloaders or self._urls:
+                    async with self._urls_lock:
+                        url, download_entity = self._urls.popitem()
                     if url in downloading:
                         continue
                     downloading[url] = True
                     assert isinstance(download_entity, PDManager.FileDownloader)
-                    if len(downloaders) < self.max_downloads:
-                        downloaders.append(
+                    if len(self._downloaders) < self.max_downloads:
+                        self._downloaders.append(
                             asyncio.create_task(download_entity.start_download())
                         )
                     else:
-                        await self.wait(downloaders)
-                        downloaders.append(
+                        await self.wait(self._downloaders)
+                        self._downloaders.append(
                             asyncio.create_task(download_entity.start_download())
                         )
                     self._logger.debug(f"Starting download for {url}")
-                await self.wait(downloaders)
+                await self.wait(self._downloaders)
                 await asyncio.sleep(1)
+
+    async def _start_download(self):
+        while True:
+            self._logger.debug(self)
+            self._downloaders = []
+            downloading = {}
+            with self._progress:
+                while self._urls:
+                    async with self._urls_lock:
+                        url, download_entity = self._urls.popitem()
+                    if url in downloading:
+                        continue
+                    downloading[url] = True
+                    assert isinstance(download_entity, PDManager.FileDownloader)
+                    if len(self._downloaders) < self.max_downloads:
+                        self._downloaders.append(
+                            asyncio.create_task(download_entity.start_download())
+                        )
+                    else:
+                        await self.wait(self._downloaders)
+                        self._downloaders.append(
+                            asyncio.create_task(download_entity.start_download())
+                        )
+                    await asyncio.sleep(0.1)
+                    if not self._urls:
+                        break
+            await asyncio.sleep(1)
+
+    async def start_download(self):  # 持续下载
+        self._downloader_main = asyncio.create_task(self._start_download())
+
+    async def stop_download(self):  # 停止持续下载
+        if self._downloader_main:
+            self._downloader_main.cancel()
+            self._downloader_main = None
 
     def urls(self) -> List[str]:
         return list(self._urls.keys())
 
     def __str__(self):
         return f"PDManager(threads={self.max_downloads}, timeout={self.timeout}, retry={self.retry}, debug={self.debug}, continue_download={self.continue_download}, max_concurrent_downloads={self.max_concurrent_downloads}, min_split_size={self.min_split_size})"
+
+    def __del__(self):
+        asyncio.run(self.stop_download())
+
+    # 支持with语法
+    async def __aenter__(self):
+        await self.continue_download()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.wait()
+        await self.stop_download()
+
+    def __enter__(self):
+        asyncio.run(self.__aenter__())
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        asyncio.run(self.__aexit__(exc_type, exc, tb))
 
     class FileDownloader:
         def __init__(
@@ -657,7 +718,7 @@ class PDManager:
                     )
                     return False
 
-        async def start_download(self, _iter=None):
+        async def start_download(self, _iter=None):  # TODO @retry
             if _iter is None:
                 _iter = self.parent.retry
             try:
