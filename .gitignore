@@ -8,3 +8,4 @@ download.log
 *.dist-info/
 build/
 dist/
+_pdm.py

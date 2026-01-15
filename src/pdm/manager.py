@@ -224,29 +224,29 @@ class PDManager:
         dir_path: str = os.getcwd(),
         log_path: str = None,
     ):
-        async def _append_safe():
-            async with self._urls_lock:
-                self._urls[url] = PDManager.FileDownloader(
-                    self, url, dir_path, filename=file_name, md5=md5, log_path=log_path
-                )
+        asyncio.run(self.aappend(url, md5, file_name, dir_path, log_path))
+
+    async def aappend(
+        self,
+        url: str,
+        md5: str = None,
+        file_name: str = None,
+        dir_path: str = os.getcwd(),
+        log_path: str = None,
+    ):
+        async with self._urls_lock:
+            self._urls[url] = PDManager.FileDownloader(
+                self, url, dir_path, filename=file_name, md5=md5, log_path=log_path
+            )
             self._logger.debug(f"Added URL: {url}")
 
-        # 支持在同步上下文中调用
-        if asyncio.get_event_loop().is_running():
-            return asyncio.create_task(_append_safe())
-        else:
-            asyncio.run(_append_safe())
-
     def pop(self, url: str):
-        async def _pop_safe():
-            async with self._urls_lock:
-                self._urls.pop(url, None)
-            self._logger.debug(f"Removed URL: {url}")
+        asyncio.run(self.apop(url))
 
-        if asyncio.get_event_loop().is_running():
-            return asyncio.create_task(_pop_safe())
-        else:
-            asyncio.run(_pop_safe())
+    async def apop(self, url: str):
+        async with self._urls_lock:
+            self._urls.pop(url, None)
+        self._logger.debug(f"Removed URL: {url}")
 
     async def wait(self, downloaders: list[asyncio.Task]):
         done, pending = await asyncio.wait(
@@ -267,9 +267,11 @@ class PDManager:
         downloaders = []
         downloading = {}
         with self._progress:
-
-            while self._urls:
-                for url, download_entity in self._urls.items():
+            while downloaders or self._urls:
+                for (
+                    url,
+                    download_entity,
+                ) in self._urls.items():  # TODO self._urls被修改会报错，改成队列
                     if url in downloading:
                         continue
                     downloading[url] = True
