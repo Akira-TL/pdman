@@ -1,3 +1,3 @@
-from .manager import PDManager
+from .manager import Manager
 
-__all__ = ["PDManager"]
+__all__ = ["Manager"]

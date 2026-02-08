@@ -9,7 +9,7 @@ import os
 import sys
 import argparse
 import asyncio
-from .manager import PDManager
+from .manager import Manager
 
 version = "0.1.2"
 
@@ -20,7 +20,7 @@ def main(argv=None):
         "-v",
         "--version",
         action="version",
-        version=f"pdm-downloader version {version}",
+        version=f"PythonDownloadManager(PDM) version {version}",
         help="Print the version number and exit.",
     )
     parser.add_argument(
@@ -168,7 +168,7 @@ def main(argv=None):
     if args.force_sequential and args.out is not None:
         args.out = None
 
-    pdm = PDManager(
+    pdm = Manager(
         max_downloads=args.max_downloads,
         log_path=args.log,
         debug=args.debug,
