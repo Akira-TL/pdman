@@ -410,7 +410,7 @@ class Downloader:
                 and os.path.exists(os.path.join(self.filepath, self.filename))
                 and not self.parent.auto_file_renaming
             ):
-                await self.parent.apop(self.url)
+                await self.parent.pop(self.url)
                 return self.url
             self.task = None
             await self._start_download()

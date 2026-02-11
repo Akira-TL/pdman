@@ -2,7 +2,7 @@ tmp.txt
 download.log
 *pyc
 .pdm*
-*test*
+*tmp*
 .vscode/launch.json
 *.egg-info/
 *.dist-info/

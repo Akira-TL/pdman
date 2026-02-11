@@ -37,6 +37,7 @@ from rich.progress import (
 )
 from .chunk import Chunk
 from .downloader import Downloader
+from .utils import auto_sync
 
 
 class Manager:
@@ -126,7 +127,8 @@ class Manager:
         self.out_dir = out_dir
 
         self._urls_lock = asyncio.Lock()
-        self._urls: dict = {}
+        self._urls: dict = {}  # {url: Downloader item, ...}
+        """{url: `Downloader` item, ...}"""
         self._console = Console()
         self._progress = Progress(
             TextColumn("[bold blue]{task.description}"),
@@ -143,17 +145,12 @@ class Manager:
 
     def config(self, **kwargs):
         for k, v in kwargs.items():
-            if hasattr(self, k) and k not in [
-                "_urls",
-                "_progress",
-                "_logger",
-                "_urls_lock",
-            ]:
+            if hasattr(self, k) and not k.startswith("_"):
                 setattr(self, k, v)
         self._parse_config()
 
     @classmethod
-    def _parse_config(self: Manager):
+    def _parse_config(self: Manager) -> None:
         """
         ### 解析配置项，处理日志设置、并发限制、大小单位转换等逻辑。
 
@@ -280,41 +277,29 @@ class Manager:
             None
         """
         with open(input_file, "r") as f:
-            content = f.read()  # TODO 修改读取方式的判断逻辑，不依赖报错
-            try:
-                data = json.loads(content)
-                self.add_urls(data)
-            except json.JSONDecodeError:
-                try:
-                    data = yaml.safe_load(content)
-                    self.add_urls(data)
-                except Exception:
+            content = f.read()
+            endfix = os.path.splitext(input_file)[1].lower()
+            assert type(content) == str
+            match endfix:
+                case ".json":
+                    try:
+                        data = json.loads(content)
+                        self.add_urls(data)
+                    except json.JSONDecodeError as e:
+                        self._logger.error(f"Failed to parse JSON: {e}")
+                case ".yaml" | ".yml":
+                    try:
+                        data = yaml.safe_load(content)
+                        self.add_urls(data)
+                    except yaml.YAMLError as e:
+                        self._logger.error(f"Failed to parse YAML: {e}")
+                case _:
                     url_list = content.splitlines()
                     url_list = [url.strip() for url in url_list if url.strip()]
                     self.add_urls(url_list)
 
-    def append(
-        self,
-        url: str,
-        md5: str = None,
-        file_name: str = None,
-        dir_path: str = os.getcwd(),
-        log_path: str = None,
-    ) -> None:
-        """
-        添加单个 URL 到下载队列(同步方法)。
-        args:
-            url: 下载链接
-            md5: 可选的 MD5 校验值
-            file_name: 可选的文件名，默认为 URL 中的文件名
-            dir_path: 可选的下载目录，默认为当前工作目录
-            log_path: 可选的日志路径，默认为 None
-        returns:
-            None
-        """
-        asyncio.run(self.aappend(url, md5, file_name, dir_path, log_path))
-
-    async def aappend(
+    @auto_sync
+    async def append(
         self,
         url: str,
         md5: str = None,
@@ -339,126 +324,103 @@ class Manager:
             )
             self._logger.debug(f"Added URL: {url}")
 
-    def pop(self, url: str) -> dict | None:
-        result = asyncio.run(self.apop(url))
-        return result
-
-    async def apop(self, url: str) -> dict | None:
+    @auto_sync
+    async def pop(self, url: str) -> dict | None:
         async with self._urls_lock:
-            result: dict | None = self._urls.pop(url, None)
-        self._logger.debug(f"Removed URL: {url}")
+            result = self._urls.pop(url, None)
+        self._logger.debug(f"Popped URL: {url}")
         return result
 
-    async def wait(self, downloaders: list[asyncio.Task] = None) -> None:
-        if downloaders is None:
-            downloaders = self._downloaders
-        while downloaders:
-            try:
-                done, pending = await asyncio.wait(
-                    downloaders, return_when=asyncio.FIRST_COMPLETED
-                )
-            except Exception as e:
-                self._logger.error(f"wait error: {e}")
-                self._logger.error(traceback.format_exc())
-                return
-            for d in done:
-                try:
-                    _url = d.result()
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    self._logger.error(f"task error: {e}")
-                    self._logger.error(traceback.format_exc())
-            downloaders = pending
+    @auto_sync
+    async def popitem(self) -> tuple[str, dict] | None:
+        async with self._urls_lock:
+            if not self._urls:
+                return None
+            url, download_entity = self._urls.popitem()
+        self._logger.debug(f"Popped URL item: {url}")
+        return url, download_entity
 
-    async def download(self) -> None:  # TODO 命名修改
+    async def wait(self) -> None:
+        while self._downloaders:
+            await self.wait_one()
+
+    async def wait_one(self) -> None:
+        try:
+            done, pending = await asyncio.wait(
+                self._downloaders, return_when=asyncio.FIRST_COMPLETED
+            )
+        except Exception as e:
+            self._logger.error(f"wait error: {e}")
+            self._logger.error(traceback.format_exc())
+            return
+        for d in done:
+            try:
+                _url = d.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self._logger.error(f"task error: {e}")
+                self._logger.error(traceback.format_exc())
+        self._downloaders = pending
+
+    async def download(self) -> None:
         """
         开始下载任务。
         """
+        self._logger.debug(self)
         self._downloader_main = asyncio.create_task(self._download_once())
         try:
             await self._downloader_main
         finally:
             self._downloader_main = None
 
-    async def _download_once(self) -> None:
-        self._logger.debug(self)
-        self._downloaders = []
-        downloading = {}
-        if self._urls:
-            with self._progress:
-                while self._urls:
-                    async with self._urls_lock:
-                        url, download_entity = self._urls.popitem()
-                    if url in downloading:
-                        continue
-                    downloading[url] = True
-                    assert isinstance(download_entity, Downloader)
-                    if len(self._downloaders) < self.max_downloads:
-                        self._downloaders.append(
-                            asyncio.create_task(download_entity.start_download())
-                        )
-                    else:
-                        await self.wait(self._downloaders)
-                        self._downloaders.append(
-                            asyncio.create_task(download_entity.start_download())
-                        )
-                    self._logger.debug(f"Starting download for {url}")
-                await self.wait(self._downloaders)
-                await asyncio.sleep(1)
+    async def _download_once(self, downloading=None) -> None:
+        if downloading is None:
+            downloading = {}
+        with self._progress:
+            while self._urls:
+                url, download_entity = await self.popitem()
+                if url in downloading:
+                    continue
+                downloading[url] = True
+                assert isinstance(download_entity, Downloader)
+                if len(self._downloaders) < self.max_downloads:
+                    self._downloaders.append(
+                        asyncio.create_task(download_entity.start_download())
+                    )
+                else:
+                    await self.wait_one()
+                    self._downloaders.append(
+                        asyncio.create_task(download_entity.start_download())
+                    )
+                self._logger.debug(f"Starting download for {url}")
+            await self.wait()
+            await asyncio.sleep(0.1)
 
-    async def _start_download(self) -> None:
+    async def _loop(self) -> None:
         self._logger.debug(self)
-        self._downloaders = []
         downloading = {}
         while True:
-            if self._urls:
-                with self._progress or self._downloaders:
-                    while self._urls:
-                        async with self._urls_lock:
-                            url, download_entity = self._urls.popitem()
-                        if url in downloading:
-                            continue
-                        downloading[url] = True
-                        assert isinstance(download_entity, Downloader)
-                        if len(self._downloaders) < self.max_downloads:
-                            self._downloaders.append(
-                                asyncio.create_task(download_entity.start_download())
-                            )
-                        else:
-                            # await self.wait(self._downloaders)
-                            done, pending = await asyncio.wait(
-                                self._downloaders, return_when=asyncio.FIRST_COMPLETED
-                            )
-                            for d in done:
-                                try:
-                                    _url = d.result()
-                                except asyncio.CancelledError:
-                                    pass
-                                except Exception as e:
-                                    self._logger.error(f"task error: {e}")
-                                    self._logger.error(traceback.format_exc())
-                                finally:
-                                    self._downloaders.remove(d)
-                            self._downloaders.append(
-                                asyncio.create_task(download_entity.start_download())
-                            )
-                        await asyncio.sleep(0.1)
-                        if not self._urls:
-                            break
+            await self._download_once(downloading)
             await asyncio.sleep(1)
 
-    async def start_download(self) -> None:  # 持续下载
+    async def start_loop(self) -> None:  # 持续下载
         """
         开始下载循环
         """
-        self._downloader_main = asyncio.create_task(self._start_download())
+        if self._downloader_main is not None:
+            self._logger.warning("Download loop is already running.")
+            return
+        else:
+            self._downloader_main = asyncio.create_task(self._loop())
 
-    async def stop_download(self) -> None:  # 停止持续下载
+    async def stop_loop(self) -> None:  # 停止持续下载
         """
         停止下载循环。
         """
-        if self._downloader_main:
+        if self._downloader_main is None:
+            self._logger.warning("Download loop is not running.")
+        else:
             self._downloader_main.cancel()
             self._downloader_main = None
 
@@ -474,7 +436,7 @@ class Manager:
         return f"Manager(threads={self.max_downloads}, timeout={self.timeout}, retry={self.retry}, debug={self.debug}, continue_download={self.continue_download}, max_concurrent_downloads={self.max_concurrent_downloads}, min_split_size={self.min_split_size})"
 
     def __del__(self):
-        asyncio.run(self.stop_download())
+        asyncio.run(self.stop_loop())
 
     # 支持with语法
     async def __aenter__(self):
@@ -487,7 +449,7 @@ class Manager:
 
     async def __aexit__(self, exc_type, exc, tb):
         await self.wait()
-        await self.stop_download()
+        await self.stop_loop()
 
     def __exit__(self, exc_type, exc, tb):
         asyncio.run(self.__aexit__(exc_type, exc, tb))
