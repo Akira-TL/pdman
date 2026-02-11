@@ -41,8 +41,38 @@ from .downloader import Downloader
 
 class Manager:
     """
-    下载管理器，负责全局配置、任务队列调度与进度显示。
-    提供解析输入、创建下载器、并发控制与重试等能力。
+    ### 负责管理下载任务，提供添加 URL、启动下载、停止下载等功能。
+
+    args:
+        max_downloads: 最大下载**任务**数
+        timeout: 下载超时时间，单位秒
+        retry: 下载失败重试次数
+        retry_wait: 下载失败重试等待时间，单位秒
+        log_path: 日志输出路径或对象
+        debug: 是否启用调试模式
+        check_integrity: 是否启用完整性校验
+        continue_download: 是否启用断点续传
+        max_concurrent_downloads: 最大并发下载数
+        min_split_size: 最小分块大小，单位支持 K/M/G
+        force_sequential: 是否强制顺序下载
+        tmp_dir: 临时文件目录
+        user_agent: HTTP 请求的 User-Agent 字段
+        chunk_retry_speed: 分块下载重试速度阈值，单位支持 K/M/G
+        chunk_timeout: 分块下载超时时间，单位秒
+        auto_file_renaming: 是否启用自动文件重命名以避免冲突
+        out_dir: 下载文件输出目录，默认为当前工作目录
+
+    attributes:
+        config: 更新配置项的方法
+        add_urls: 添加下载 URL 的方法，支持列表或字典格式
+        load_input_file: 从文件加载下载 URL 的方法，支持 JSON/YAML/纯文本格式
+        append: 添加单个下载 URL 的方法，支持指定文件名、目录和日志路径
+        pop: 移除下载 URL 的方法
+        wait: 等待下载任务完成的方法
+        download: 启动下载的方法
+        start_download: 启动持续下载的方法
+        stop_download: 停止持续下载的方法
+        urls: 获取当前下载 URL 列表的方法
     """
 
     def __init__(
@@ -65,10 +95,6 @@ class Manager:
         auto_file_renaming: bool = True,
         out_dir: str = None,
     ):
-        """
-        初始化下载管理器。
-        参数：同原脚本 pdm.py。
-        """
         self.max_downloads = max_downloads
         self.timeout = timeout
         self.chunk_timeout = chunk_timeout
@@ -113,7 +139,7 @@ class Manager:
         )
         self._downloader_main = None
         self._downloaders = []
-        self.parse_config()
+        self._parse_config()
 
     def config(self, **kwargs):
         for k, v in kwargs.items():
@@ -124,9 +150,21 @@ class Manager:
                 "_urls_lock",
             ]:
                 setattr(self, k, v)
-        self.parse_config()
+        self._parse_config()
 
-    def parse_config(self):
+    @classmethod
+    def _parse_config(self: Manager):
+        """
+        ### 解析配置项，处理日志设置、并发限制、大小单位转换等逻辑。
+
+        args:
+            self: Manager 实例
+
+        returns:
+            None
+
+        """
+        # >>> 解析日志设置
         self._logger.remove()
         self._logger.add(
             lambda msg: self._console.print(Text.from_ansi(str(msg)), end="\n"),
@@ -143,6 +181,18 @@ class Manager:
                 colorize=True,
                 format="<g>{time:MM-DD HH:mm:ss}</g> [<lvl>{level}</lvl>] <c><u>{name}</u></c> | {message}",
             )
+        # <<< 解析日志设置
+        # >>> 解析下载参数
+        # 并发下载任务配置
+        self.max_downloads = int(self.max_downloads)
+        if self.max_downloads < 1:
+            self.max_downloads = 1
+            self._logger.warning("threads cannot be less than 1. Setting to 1.")
+        elif self.max_downloads > 32:
+            self._logger.warning(
+                "threads are more than 32, may cause high resource usage. "
+            )
+        # 单任务并发限制
         if self.max_concurrent_downloads < 1:
             self.max_concurrent_downloads = 1
             self._logger.warning(
@@ -152,26 +202,32 @@ class Manager:
             self._logger.warning(
                 "max_concurrent_downloads is more than 32, becareful of server limits. "
             )
-        self.min_split_size = self.parse_size(self.min_split_size)
-        self.chunk_retry_speed = self.parse_size(self.chunk_retry_speed)
+        # 数值转换
+        self.min_split_size = self._parse_size(self.min_split_size)
+        self.chunk_retry_speed = self._parse_size(self.chunk_retry_speed)
         if self.force_sequential:
             self.max_concurrent_downloads = 1
             self._logger.info("Force sequential download enabled.")
-        self.max_downloads = int(self.max_downloads)
-        if self.max_downloads < 1:
-            self.max_downloads = 1
-            self._logger.warning("threads cannot be less than 1. Setting to 1.")
-        elif self.max_downloads > 32:
-            self._logger.warning(
-                "threads are more than 32, may cause high resource usage. "
-            )
+        # <<< 解析下载参数
+        # >>> 解析 User-Agent 配置
         if isinstance(self.user_agent, str):
             try:
                 self.user_agent = json.loads(self.user_agent)
             except Exception:
                 self.user_agent = {"User-Agent": self.user_agent}
+        # <<< 解析 User-Agent 配置
 
-    def parse_size(self, size_str: str) -> int:
+    def _parse_size(self, size_str: str) -> int:
+        """
+        ### 解析大小字符串，支持 K/M/G 单位，并转换为字节数。
+
+        args:
+            size_str: 大小字符串，例如 "1M", "500K", "2G"
+        returns:
+            int: 转换后的字节数，整数类型
+        raises:
+            ValueError: 如果输入格式不正确，抛出异常
+        """
         if size_str is None or size_str == "":
             return None
         size_str = str(size_str).strip().upper()
@@ -189,7 +245,15 @@ class Manager:
         else:
             raise ValueError(f"Invalid size format: {size_str}")
 
-    def add_urls(self, url_list: dict | list[str]):
+    def add_urls(self, url_list: dict | list[str]) -> None:
+        """
+        添加多个 URL 到下载队列。
+
+        args:
+            url_list: 可以是字典或字符串列表。如果是字典，键为 URL，值为包含 md5、file_name、dir_path 和 log_path 的字典。
+        returns:
+            None
+        """
         if type(url_list) == dict:
             for url, v in url_list.items():
                 assert type(v) == dict
@@ -206,9 +270,17 @@ class Manager:
             for url in url_list:
                 self.append(url, dir_path=self.out_dir if self.out_dir else os.getcwd())
 
-    def load_input_file(self, input_file: str):
+    def load_input_file(self, input_file: str) -> None:
+        """
+        加载输入文件并将其中的 URL 添加到下载队列。
+
+        args:
+            input_file: 输入文件路径，支持 JSON、YAML 或纯文本格式。
+        returns:
+            None
+        """
         with open(input_file, "r") as f:
-            content = f.read()
+            content = f.read()  # TODO 修改读取方式的判断逻辑，不依赖报错
             try:
                 data = json.loads(content)
                 self.add_urls(data)
@@ -228,7 +300,18 @@ class Manager:
         file_name: str = None,
         dir_path: str = os.getcwd(),
         log_path: str = None,
-    ):
+    ) -> None:
+        """
+        添加单个 URL 到下载队列(同步方法)。
+        args:
+            url: 下载链接
+            md5: 可选的 MD5 校验值
+            file_name: 可选的文件名，默认为 URL 中的文件名
+            dir_path: 可选的下载目录，默认为当前工作目录
+            log_path: 可选的日志路径，默认为 None
+        returns:
+            None
+        """
         asyncio.run(self.aappend(url, md5, file_name, dir_path, log_path))
 
     async def aappend(
@@ -238,23 +321,35 @@ class Manager:
         file_name: str = None,
         dir_path: str = os.getcwd(),
         log_path: str = None,
-    ):
+    ) -> None:
+        """
+        添加单个 URL 到下载队列。
+        args:
+            url: 下载链接
+            md5: 可选的 MD5 校验值
+            file_name: 可选的文件名，默认为 URL 中的文件名
+            dir_path: 可选的下载目录，默认为当前工作目录
+            log_path: 可选的日志路径，默认为 None
+        returns:
+            None
+        """
         async with self._urls_lock:
             self._urls[url] = Downloader(
                 self, url, dir_path, filename=file_name, md5=md5, log_path=log_path
             )
             self._logger.debug(f"Added URL: {url}")
 
-    def pop(self, url: str):
-        return asyncio.run(self.apop(url))
+    def pop(self, url: str) -> dict | None:
+        result = asyncio.run(self.apop(url))
+        return result
 
-    async def apop(self, url: str):
+    async def apop(self, url: str) -> dict | None:
         async with self._urls_lock:
-            result = self._urls.pop(url, None)
+            result: dict | None = self._urls.pop(url, None)
         self._logger.debug(f"Removed URL: {url}")
         return result
 
-    async def wait(self, downloaders: list[asyncio.Task] = None):
+    async def wait(self, downloaders: list[asyncio.Task] = None) -> None:
         if downloaders is None:
             downloaders = self._downloaders
         while downloaders:
@@ -276,14 +371,17 @@ class Manager:
                     self._logger.error(traceback.format_exc())
             downloaders = pending
 
-    async def download(self):
+    async def download(self) -> None:  # TODO 命名修改
+        """
+        开始下载任务。
+        """
         self._downloader_main = asyncio.create_task(self._download_once())
         try:
             await self._downloader_main
         finally:
             self._downloader_main = None
 
-    async def _download_once(self):
+    async def _download_once(self) -> None:
         self._logger.debug(self)
         self._downloaders = []
         downloading = {}
@@ -309,7 +407,7 @@ class Manager:
                 await self.wait(self._downloaders)
                 await asyncio.sleep(1)
 
-    async def _start_download(self):
+    async def _start_download(self) -> None:
         self._logger.debug(self)
         self._downloaders = []
         downloading = {}
@@ -350,15 +448,26 @@ class Manager:
                             break
             await asyncio.sleep(1)
 
-    async def start_download(self):  # 持续下载
+    async def start_download(self) -> None:  # 持续下载
+        """
+        开始下载循环
+        """
         self._downloader_main = asyncio.create_task(self._start_download())
 
-    async def stop_download(self):  # 停止持续下载
+    async def stop_download(self) -> None:  # 停止持续下载
+        """
+        停止下载循环。
+        """
         if self._downloader_main:
             self._downloader_main.cancel()
             self._downloader_main = None
 
     def urls(self) -> List[str]:
+        """
+        获取当前下载 URL 列表。
+        returns:
+            List[str]: 当前下载 URL 列表
+        """
         return list(self._urls.keys())
 
     def __str__(self):
@@ -372,13 +481,13 @@ class Manager:
         await self.continue_download()
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
-        await self.wait()
-        await self.stop_download()
-
     def __enter__(self):
         asyncio.run(self.__aenter__())
         return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.wait()
+        await self.stop_download()
 
     def __exit__(self, exc_type, exc, tb):
         asyncio.run(self.__aexit__(exc_type, exc, tb))
