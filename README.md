@@ -1,12 +1,6 @@
 # PDM — 模拟 IDM 下载流程的 Python 工具
 
-> NOTE:  
-> 以下内容为 AI 自动生成，并不代表全部功能  
-> 等软件写完了基本稳定了就手写
-
 一个使用 Python 实现的异步多段下载器，支持多连接分块下载、断点续传、下载进度展示、低速分片自动重启、批量任务等功能。
-
-当前实现基于 asyncio + aiohttp + aiofiles + rich + loguru，所有行为均以源码 [pdm.py](pdm.py) 为准。
 
 ---
 
@@ -33,16 +27,9 @@
 ## 安装依赖
 
 ```bash
-pip install aiohttp aiofiles rich loguru yarl pyyaml
+pip install -r requirements.txt
+pip install git+https://github.com/Akira-TL/pdm.git
 ```
-
-> 说明：
->
-> - `aiohttp` / `aiofiles`：异步 HTTP 与文件读写
-> - `rich`：进度条与终端输出
-> - `loguru`：日志
-> - `yarl`：URL 处理
-> - `pyyaml`：解析 YAML 任务文件
 
 ---
 
@@ -51,7 +38,7 @@ pip install aiohttp aiofiles rich loguru yarl pyyaml
 ### 1. 单 URL 下载
 
 ```bash
-python pdm.py "https://example.com/file.bin"
+pdm "https://example.com/file.bin"
 ```
 
 行为说明：
@@ -100,7 +87,7 @@ python pdm.py -i urls.txt
 
 #### 3.2 JSON 任务文件
 
-JSON 结构为「URL 作为键，对应配置作为值」：
+JSON 结构为：
 
 ```json
 {
@@ -118,7 +105,7 @@ JSON 结构为「URL 作为键，对应配置作为值」：
 ```
 
 ```bash
-python pdm.py -i tasks.json
+pdm -i tasks.json
 ```
 
 字段说明：
@@ -150,7 +137,7 @@ https://example.com/b.zip:
 执行：
 
 ```bash
-python pdm.py -i tasks.yaml
+pdm -i tasks.yaml
 ```
 
 ---
@@ -170,12 +157,12 @@ python pdm.py -i tasks.yaml
 
 ---
 
-## 命令行参数（以 pdm.py 为准）
+## 命令行参数
 
 ### 通用
 
-- [x] `-v, --version`：打印版本号（`0.1.1`）后退出。
-- [x] `-l, --log PATH`：日志文件路径；若为 `-`，日志输出到标准输出。
+- [x] `-v, --version`：打印版本号后退出。
+- [x] `-l, --log PATH`：日志文件路径。
 - [x] `--debug`：启用调试模式，日志级别提升为 DEBUG。
 
 ### 下载目标与输出
@@ -213,7 +200,7 @@ python pdm.py -i tasks.yaml
 
 ---
 
-## 当前进度（概览）
+## 当前进度
 
 - [x] 异步下载框架与分块调度
 - [x] rich 进度条与 loguru 日志集成
@@ -226,7 +213,3 @@ python pdm.py -i tasks.yaml
 - [x] 全局 `-d/--dir`、`-o/--out`、`-ua/--user-agent`
 
 ---
-
-## 源码
-
-- 主程序： [pdm.py](pdm.py)
