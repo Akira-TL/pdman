@@ -149,8 +149,7 @@ class Manager:
                 setattr(self, k, v)
         self._parse_config()
 
-    @classmethod
-    def _parse_config(self: Manager) -> None:
+    def _parse_config(self) -> None:
         """
         ### 解析配置项，处理日志设置、并发限制、大小单位转换等逻辑。
 

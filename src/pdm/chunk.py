@@ -77,6 +77,9 @@ class Chunk:
         return self.size + other
 
     def _is_complete(self) -> bool:
+        if self.end is None:
+            self.parent._downloaded = True
+            return self.size > 0
         return self.end is not None and self.size == self.end - self.start + 1
 
     def _needs_download(self) -> bool:

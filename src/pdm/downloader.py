@@ -262,6 +262,8 @@ class Downloader:
             max_gap = 0
             target_chunk: Chunk = None
             for chunk in self.chunk_root:
+                if chunk.end is None:
+                    return None
                 gap = chunk.end - chunk.size - chunk.start + 1
                 if gap > max_gap:
                     max_gap = gap
