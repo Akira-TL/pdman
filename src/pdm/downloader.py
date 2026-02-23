@@ -1,9 +1,5 @@
-import random
 import re
 import os
-import sys
-import traceback
-import yaml
 import json
 import time
 import shutil
@@ -11,24 +7,13 @@ import asyncio
 import hashlib
 import aiohttp
 import aiofiles
+import traceback
 from yarl import URL
 from glob import glob
 from rich.text import Text
 from urllib.parse import unquote
-from typing import List, Optional, TextIO
 from loguru._logger import Logger, Core
 
-
-from rich.progress import (
-    Progress,
-    Console,
-    BarColumn,
-    DownloadColumn,
-    TransferSpeedColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-    TextColumn,
-)
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -336,7 +321,7 @@ class Downloader:
     async def merge_chunks(self):
         if os.path.exists(os.path.join(self.filepath, self.filename)):
             index = 0
-            while True:
+            while True:  # TODO 重命名原则添加到后缀前
                 index += 1
                 if not os.path.exists(
                     os.path.join(self.filepath, f"{self.filename}.{index}")
