@@ -320,14 +320,26 @@ class Downloader:
 
     async def merge_chunks(self):
         if os.path.exists(os.path.join(self.filepath, self.filename)):
+            suffixs = self.filename.split(".")
+            if len(suffixs) > 2:
+                if suffixs[-2] in ("tar"):
+                    suffix = ".".join(suffixs[-2:])
+                else:
+                    suffix = suffixs[-1]
+            prefix = self.filename[: -len(suffix) - 1]
+            redownloaded_files = set(
+                glob(os.path.join(self.filepath, f"{prefix}(*).{suffix}"))
+            )
             index = 0
-            while True:  # TODO 重命名原则添加到后缀前
+            while True:
                 index += 1
-                if not os.path.exists(
-                    os.path.join(self.filepath, f"{self.filename}.{index}")
+                if (
+                    os.path.join(self.filepath, f"{prefix}({index}).{suffix}")
+                    not in redownloaded_files
                 ):
-                    self.filename = f"{self.filename}.{index}"
+                    self.filename = f"{prefix}({index}).{suffix}"
                     break
+
         dest_path = os.path.join(self.filepath, self.filename)
         temp_path = dest_path + ".tmp"
         self.parent._progress.update(
@@ -408,10 +420,15 @@ class Downloader:
             self._logger.debug(traceback.format_exc())
             await asyncio.sleep(self.parent.retry_wait)
             await self.start_download(_iter=_iter - 1) if _iter > 0 else None
-        # await self.parent.apop(self.url)
         if self._done:
+            self.parent._logger.success(
+                f"Finished download {self.filename} from {self.url}"
+            )
             return self.url
         else:
+            self.parent._logger.error(
+                f"Failed to download {self.filename} from {self.url}"
+            )
             raise Exception(f"Failed to download {self.url} after retries.")
 
     async def _start_download(self):
