@@ -199,8 +199,10 @@ def main(argv=None):
         for file in args.input_file:
             if os.path.exists(file):
                 pdman.load_input_file(file)
-
-    asyncio.run(pdman.download())
+    try:
+        asyncio.run(pdman.download())
+    except KeyboardInterrupt:
+        print("\033[31mDownload interrupted by user.")
 
 
 if __name__ == "__main__":

@@ -319,11 +319,10 @@ class Downloader:
     async def merge_chunks(self):
         if os.path.exists(os.path.join(self.filepath, self.filename)):
             suffixs = self.filename.split(".")
-            if len(suffixs) > 2:
-                if suffixs[-2] in ("tar"):
-                    suffix = ".".join(suffixs[-2:])
-                else:
-                    suffix = suffixs[-1]
+            if len(suffixs) > 2 and suffixs[-2] in ("tar"):
+                suffix = ".".join(suffixs[-2:])
+            else:
+                suffix = suffixs[-1]
             prefix = self.filename[: -len(suffix) - 1]
             redownloaded_files = set(
                 glob(os.path.join(self.filepath, f"{prefix}(*).{suffix}"))
@@ -435,20 +434,20 @@ class Downloader:
         async def progress_run():
             if self.file_size < 0:
                 self.task = self.parent._progress.add_task(
-                    f"Downloading {self.filename}", total=None
+                    f"Downloading {self.filename}", total=None,dl = len(tasks)
                 )
                 while not self._downloaded:
                     await asyncio.sleep(1)
             else:
                 self.task = self.parent._progress.add_task(
-                    f"Downloading {self.filename}", total=self.file_size
+                    f"Downloading {self.filename}", total=self.file_size,dl = len(tasks)
                 )
                 while self.file_size > sum(self.chunk_root):
                     self.parent._progress.update(
-                        self.task, completed=sum(self.chunk_root)
+                        self.task, completed=sum(self.chunk_root),dl = len(tasks)
                     )
                     await asyncio.sleep(1)
-                self.parent._progress.update(self.task, completed=sum(self.chunk_root))
+                self.parent._progress.update(self.task, completed=sum(self.chunk_root),dl = len(tasks))
                 self.parent._logger.info(f"Completed downloading {self.filename}")
             # self.parent._progress.stop_task(self.task)
             # self.parent._progress.remove_task(self.task)

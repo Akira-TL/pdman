@@ -133,6 +133,7 @@ class Manager:
         self._progress = Progress(
             TextColumn("[bold blue]{task.description}"),
             BarColumn(),
+            TextColumn("[bold blue]DL:{task.fields[dl]}"),
             DownloadColumn(binary_units=True),
             TransferSpeedColumn(),
             TimeElapsedColumn(),
