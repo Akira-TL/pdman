@@ -398,7 +398,7 @@ class Manager:
 
     async def _loop(self) -> None:
         self._logger.debug(self)
-        downloading = {}
+        downloading = {} # 存储下载历史记录，避免重复下载
         while True:
             await self._download_once(downloading)
             await asyncio.sleep(1)
@@ -437,7 +437,7 @@ class Manager:
 
     # 支持with语法
     async def __aenter__(self):
-        await self.continue_download()
+        await self.start_loop()
         return self
 
     def __enter__(self):
@@ -445,8 +445,9 @@ class Manager:
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
+        await asyncio.sleep(1)
         await self.wait()
-        await self.stop_loop()
+        self.stop_loop()
 
     def __exit__(self, exc_type, exc, tb):
         asyncio.run(self.__aexit__(exc_type, exc, tb))
