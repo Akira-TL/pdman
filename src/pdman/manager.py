@@ -361,7 +361,7 @@ class Manager:
             except Exception as e:
                 self._logger.error(f"task error: {e}")
                 self._logger.error(traceback.format_exc())
-        self._downloaders = pending
+        self._downloaders = list(pending)
 
     async def download(self) -> None:
         """
