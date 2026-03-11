@@ -14,12 +14,12 @@ if TYPE_CHECKING:
 class Chunk:
     def __init__(
         self,
-        parent: Downloader,
+        parent:"Downloader",
         start: int,
         end: int,
         chunk_path: str,
-        forward: Chunk = None,
-        next: Chunk = None,
+        forward: "Chunk" = None,
+        next: "Chunk" = None,
     ):
         self.parent = parent
         self.start = start
