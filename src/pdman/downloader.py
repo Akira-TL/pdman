@@ -132,7 +132,7 @@ class Downloader:
         async with aiohttp.ClientSession() as session:
             cd = self.header_info.get("Content-Disposition")
             if cd:
-                fname = re.findall('.*filename="*(.+)"*', cd)
+                fname = re.findall('.*filename="*(.+)".*', cd)
                 fname = unquote(fname[0]) if fname else None
                 if fname:
                     return fname
@@ -434,20 +434,22 @@ class Downloader:
         async def progress_run():
             if self.file_size < 0:
                 self.task = self.parent._progress.add_task(
-                    f"Downloading {self.filename}", total=None,dl = len(tasks)
+                    f"Downloading {self.filename}", total=None, dl=len(tasks)
                 )
                 while not self._downloaded:
                     await asyncio.sleep(1)
             else:
                 self.task = self.parent._progress.add_task(
-                    f"Downloading {self.filename}", total=self.file_size,dl = len(tasks)
+                    f"Downloading {self.filename}", total=self.file_size, dl=len(tasks)
                 )
                 while self.file_size > sum(self.chunk_root):
                     self.parent._progress.update(
-                        self.task, completed=sum(self.chunk_root),dl = len(tasks)
+                        self.task, completed=sum(self.chunk_root), dl=len(tasks)
                     )
                     await asyncio.sleep(1)
-                self.parent._progress.update(self.task, completed=sum(self.chunk_root),dl = len(tasks))
+                self.parent._progress.update(
+                    self.task, completed=sum(self.chunk_root), dl=len(tasks)
+                )
                 self.parent._logger.info(f"Completed downloading {self.filename}")
             # self.parent._progress.stop_task(self.task)
             # self.parent._progress.remove_task(self.task)
