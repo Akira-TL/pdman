@@ -145,23 +145,35 @@ class Manager:
         self._parse_config()
 
     def config(self, **kwargs):
+        need_reparse_config = False
         for k, v in kwargs.items():
             if hasattr(self, k) and not k.startswith("_"):
                 setattr(self, k, v)
-        self._parse_config()
+                # 只有涉及日志的配置变更才触发 _parse_config 中的日志重置
+                if k in ("debug", "log_path"):
+                    need_reparse_config = True
+        if need_reparse_config:
+            self._reparse_logging()
+        # 重新解析非日志的配置项（大小转换、并发限制等）
+        self._reparse_download_params()
 
     def _parse_config(self) -> None:
         """
         ### 解析配置项，处理日志设置、并发限制、大小单位转换等逻辑。
-
-        args:
-            self: Manager 实例
-
-        returns:
-            None
-
+        （仅在 __init__ 中完整调用；更新配置时用 _reparse_logging 和 _reparse_download_params）
         """
-        # >>> 解析日志设置
+        self._reparse_logging()
+        self._reparse_download_params()
+        # >>> 解析 User-Agent 配置
+        if isinstance(self.user_agent, str):
+            try:
+                self.user_agent = json.loads(self.user_agent)
+            except Exception:
+                self.user_agent = {"User-Agent": self.user_agent}
+        # <<< 解析 User-Agent 配置
+
+    def _reparse_logging(self) -> None:
+        """重新配置日志处理器（仅在日志相关配置变更时调用）"""
         self._logger.remove()
         self._logger.add(
             lambda msg: self._console.print(Text.from_ansi(str(msg)), end="\n"),
@@ -178,9 +190,9 @@ class Manager:
                 colorize=True,
                 format="<g>{time:MM-DD HH:mm:ss}</g> [<lvl>{level}</lvl>] <c><u>{name}</u></c> | {message}",
             )
-        # <<< 解析日志设置
-        # >>> 解析下载参数
-        # 并发下载任务配置
+
+    def _reparse_download_params(self) -> None:
+        """重新解析下载参数（大小转换、并发限制等）"""
         self.max_downloads = int(self.max_downloads)
         if self.max_downloads < 1:
             self.max_downloads = 1
@@ -189,7 +201,6 @@ class Manager:
             self._logger.warning(
                 "threads are more than 32, may cause high resource usage. "
             )
-        # 单任务并发限制
         if self.max_concurrent_downloads < 1:
             self.max_concurrent_downloads = 1
             self._logger.warning(
@@ -199,20 +210,11 @@ class Manager:
             self._logger.warning(
                 "max_concurrent_downloads is more than 32, becareful of server limits. "
             )
-        # 数值转换
         self.min_split_size = self._parse_size(self.min_split_size)
         self.chunk_retry_speed = self._parse_size(self.chunk_retry_speed)
         if self.force_sequential:
             self.max_concurrent_downloads = 1
             self._logger.info("Force sequential download enabled.")
-        # <<< 解析下载参数
-        # >>> 解析 User-Agent 配置
-        if isinstance(self.user_agent, str):
-            try:
-                self.user_agent = json.loads(self.user_agent)
-            except Exception:
-                self.user_agent = {"User-Agent": self.user_agent}
-        # <<< 解析 User-Agent 配置
 
     def _parse_size(self, size_str: str) -> int:
         """
@@ -399,9 +401,14 @@ class Manager:
 
     async def _loop(self) -> None:
         self._logger.debug(self)
-        downloading = {}  # 存储下载历史记录，避免重复下载
+        downloading = {}  # 存储正在下载的 URL，避免本轮重复下载
         while True:
             await self._download_once(downloading)
+            # 清理已完成的 URL，防止持续模式下内存泄漏
+            downloaded_urls = [url for url in downloading.copy()
+                               if url not in self._urls]
+            for url in downloaded_urls:
+                downloading.pop(url, None)
             await asyncio.sleep(1)
 
     async def start_loop(self) -> None:  # 持续下载
@@ -446,7 +453,6 @@ class Manager:
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        await asyncio.sleep(1)
         await self.wait()
         self.stop_loop()
 

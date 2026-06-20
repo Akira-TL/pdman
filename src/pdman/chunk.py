@@ -73,9 +73,11 @@ class Chunk:
                 headers.pop("Range")
 
     async def _stream_response(self, response, f) -> bool:
-        last_time = time.time()
         pos = await f.tell()
         continue_flag = False
+        # 使用滑动窗口计算平均速度，避免单块瞬时速度波动过大
+        window_bytes = 0
+        window_start = time.time()
         async for data in response.content.iter_chunked(10240):
             if self.end is not None:
                 remaining = self.end - self.start + 1 - pos
@@ -86,18 +88,34 @@ class Chunk:
             async with self.parent.lock:
                 self.size += len(data)
                 now = time.time()
-                elaps = max(now - last_time, 1e-6)
-                speed = len(data) / elaps
-                if (
-                    self.parent.parent.chunk_retry_speed
-                    and speed < self.parent.parent.chunk_retry_speed
-                ):
-                    continue_flag = True
-                last_time = now
+                window_bytes += len(data)
+                window_elaps = max(now - window_start, 1e-6)
+                # 每隔 0.5 秒或窗口累计超过 512KB 时计算一次平均速度
+                if window_elaps >= 0.5 or window_bytes >= 524288:
+                    avg_speed = window_bytes / window_elaps
+                    if (
+                        self.parent.parent.chunk_retry_speed
+                        and avg_speed < self.parent.parent.chunk_retry_speed
+                    ):
+                        continue_flag = True
+                    window_bytes = 0
+                    window_start = now
             pos += len(data)
+        # 处理剩余窗口数据
+        if window_bytes > 0 and not continue_flag:
+            window_elaps = max(time.time() - window_start, 1e-6)
+            avg_speed = window_bytes / window_elaps
+            if (
+                self.parent.parent.chunk_retry_speed
+                and avg_speed < self.parent.parent.chunk_retry_speed
+            ):
+                continue_flag = True
         return continue_flag
 
     async def _split_incomplete(self):
+        # 幂等性检查：如果已经被分裂过（next 存在且 forward 指向自己），跳过
+        if self.next is not None and getattr(self.next, 'forward', None) is self:
+            return
         if self.size != self.end - self.start + 1:
             self.parent._logger.debug(
                 f"Chunk not fully downloaded, splitting chunk: {self}"
@@ -120,7 +138,6 @@ class Chunk:
 
     async def download(self):
         assert self.end is not None or self.size >= 0
-        headers = {}  # TODO 添加其他必要的headers
         file_mode = "ab" if os.path.exists(self.chunk_path) else "wb"
         async with (
             aiohttp.ClientSession(
@@ -131,6 +148,7 @@ class Chunk:
             for _ in range(self.parent.parent.retry):
                 if os.path.exists(self.chunk_path) and self._is_complete():
                     return self
+                headers = {}  # 每次重试迭代使用干净的 headers 字典
                 while True:
                     try:
                         self._apply_range_header(headers)

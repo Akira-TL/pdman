@@ -101,7 +101,13 @@ class Downloader:
         chunks = []
         for chunk in self.chunk_root:
             chunks.append(str(chunk))
-        return f"Downloader(url={self.url}, filepath={self.filepath}, filename={self.filename}, md5={self.md5}, pdm_tmp={self.pdm_tmp}, file_size={self.file_size})\n{"\n".join(chunks)}"
+        chunks_str = "\n".join(chunks)
+        return (
+            f"Downloader(url={self.url}, filepath={self.filepath}, "
+            f"filename={self.filename}, md5={self.md5}, "
+            f"pdm_tmp={self.pdm_tmp}, file_size={self.file_size})\n"
+            f"{chunks_str}"
+        )
 
     async def process_md5(self, md5):
         if md5 is None:
@@ -162,6 +168,7 @@ class Downloader:
                     )
 
     async def get_url_file_size(self) -> int:
+        file_size = None
         if self.header_info is not None:
             file_size = self.header_info.get("Content-Length")
         if file_size:
@@ -216,6 +223,26 @@ class Downloader:
         return root
 
     async def rebuild_task(self):
+        # 校验 .pdm 元数据完整性：确保恢复的临时文件属于当前下载任务
+        pdm_file = os.path.join(self.pdm_tmp, ".pdm")
+        if not os.path.exists(pdm_file):
+            return None
+        try:
+            with open(pdm_file, "r") as f:
+                info = json.load(f)
+            if (
+                info.get("url") != self.url
+                or info.get("filename") != self.filename
+                or info.get("md5") != self.md5
+                or info.get("file_size") != self.file_size
+            ):
+                self._logger.warning(
+                    ".pdm metadata mismatch, discarding stale temp files"
+                )
+                return None
+        except (json.JSONDecodeError, IOError):
+            self._logger.warning("Failed to read .pdm file, discarding temp files")
+            return None
         file_list = {
             p.removeprefix(os.path.join(self.pdm_tmp, self.filename) + "."): p
             for p in glob(os.path.join(self.pdm_tmp, self.filename) + "*")
@@ -319,7 +346,7 @@ class Downloader:
     async def merge_chunks(self):
         if os.path.exists(os.path.join(self.filepath, self.filename)):
             suffixs = self.filename.split(".")
-            if len(suffixs) > 2 and suffixs[-2] in ("tar"):
+            if len(suffixs) > 2 and suffixs[-2] == "tar":
                 suffix = ".".join(suffixs[-2:])
             else:
                 suffix = suffixs[-1]
@@ -396,37 +423,45 @@ class Downloader:
                 )
                 return False
 
-    async def start_download(self, _iter=None):  # TODO @retry
+    async def start_download(self, _iter=None):
         if _iter is None:
             _iter = self.parent.retry
-        try:
-            await self.parse_config()
-            if (
-                self.filename is not None
-                and os.path.exists(os.path.join(self.filepath, self.filename))
-                and not self.parent.auto_file_renaming
-            ):
-                await self.parent.pop(self.url)
-                return self.url
-            self.task = None
-            await self._start_download()
-            await self.merge_chunks()
-            await self.check_integrity()
-            self._done = True
-        except Exception as e:
-            self._logger.debug(traceback.format_exc())
-            await asyncio.sleep(self.parent.retry_wait)
-            await self.start_download(_iter=_iter - 1) if _iter > 0 else None
+        parsed = False
+        while _iter >= 0:
+            try:
+                if not parsed:
+                    await self.parse_config()
+                    parsed = True
+                if (
+                    self.filename is not None
+                    and os.path.exists(os.path.join(self.filepath, self.filename))
+                    and not self.parent.auto_file_renaming
+                ):
+                    await self.parent.pop(self.url)
+                    return self.url
+                self.task = None
+                await self._start_download()
+                await self.merge_chunks()
+                await self.check_integrity()
+                self._done = True
+                break
+            except Exception as e:
+                self._logger.debug(traceback.format_exc())
+                if _iter > 0:
+                    _iter -= 1
+                    await asyncio.sleep(self.parent.retry_wait)
+                else:
+                    self._logger.error(
+                        f"Failed to download {self.filename} from {self.url}"
+                    )
+                    raise Exception(
+                        f"Failed to download {self.url} after retries."
+                    ) from e
         if self._done:
             self.parent._logger.success(
                 f"Finished download {self.filename} from {self.url}"
             )
             return self.url
-        else:
-            self.parent._logger.error(
-                f"Failed to download {self.filename} from {self.url}"
-            )
-            raise Exception(f"Failed to download {self.url} after retries.")
 
     async def _start_download(self):
         tasks = []
@@ -442,13 +477,19 @@ class Downloader:
                 self.task = self.parent._progress.add_task(
                     f"Downloading {self.filename}", total=self.file_size, dl=len(tasks)
                 )
-                while self.file_size > sum(self.chunk_root):
+                while self.file_size > 0:
+                    async with self.lock:
+                        completed = sum(self.chunk_root)
+                    if self.file_size <= completed:
+                        break
                     self.parent._progress.update(
-                        self.task, completed=sum(self.chunk_root), dl=len(tasks)
+                        self.task, completed=completed, dl=len(tasks)
                     )
                     await asyncio.sleep(1)
+                async with self.lock:
+                    completed = sum(self.chunk_root)
                 self.parent._progress.update(
-                    self.task, completed=sum(self.chunk_root), dl=len(tasks)
+                    self.task, completed=completed, dl=len(tasks)
                 )
                 self.parent._logger.info(f"Completed downloading {self.filename}")
             # self.parent._progress.stop_task(self.task)
@@ -456,7 +497,10 @@ class Downloader:
 
         self.progress = asyncio.create_task(progress_run())
 
-        for chunk in self.chunk_root:
+        # 在锁保护下收集所有初始 chunk 引用，避免并发修改链表导致迭代器异常
+        async with self.lock:
+            chunks_to_start = [chunk for chunk in self.chunk_root]
+        for chunk in chunks_to_start:
             if tasks.__len__() < self.parent.max_concurrent_downloads:
                 self.parent._logger.debug(
                     f"tasks number {tasks.__len__()} < max_concurrent_downloads {self.parent.max_concurrent_downloads}, creating new task."
