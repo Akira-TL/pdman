@@ -154,6 +154,111 @@ def main(argv=None):
         default="PDMAN-Downloader/1.0",
         help="The User-Agent string to use for HTTP requests.",
     )
+    # === 认证与 Cookie ===
+    parser.add_argument(
+        "--http-auth",
+        type=str,
+        default=None,
+        help="HTTP authentication credentials in user:pass format.",
+    )
+    parser.add_argument(
+        "--cookie-file",
+        type=str,
+        default=None,
+        help="Load cookies from a Netscape/Mozilla format file.",
+    )
+    # === 限速 ===
+    parser.add_argument(
+        "--max-download-limit",
+        type=str,
+        default=None,
+        help="Max download speed per task (bytes/sec). Append K or M.",
+    )
+    parser.add_argument(
+        "--max-overall-download-limit",
+        type=str,
+        default=None,
+        help="Max overall download speed (bytes/sec). Append K or M.",
+    )
+    # === 代理 ===
+    parser.add_argument(
+        "--proxy",
+        type=str,
+        default=None,
+        help="HTTP/HTTPS proxy URL (e.g., http://127.0.0.1:8080).",
+    )
+    parser.add_argument(
+        "--proxy-auth",
+        type=str,
+        default=None,
+        help="Proxy authentication credentials in user:pass format.",
+    )
+    # === 请求头与超时 ===
+    parser.add_argument(
+        "--header",
+        type=str,
+        default=[],
+        action="append",
+        help="Add custom HTTP header (Key: Value). Repeatable.",
+    )
+    parser.add_argument(
+        "--connect-timeout",
+        type=int,
+        default=None,
+        help="Connection timeout in seconds.",
+    )
+    parser.add_argument(
+        "--max-connection-per-server",
+        type=int,
+        default=0,
+        help="Max connections per server. 0 means unlimited.",
+    )
+    parser.add_argument(
+        "--referer",
+        type=str,
+        default=None,
+        help="Set HTTP Referer header.",
+    )
+    # === 回调 ===
+    parser.add_argument(
+        "--on-download-complete",
+        type=str,
+        default=None,
+        help="Shell command to run after download completes. Supports {filename}/{filepath}/{url}/{dir}/{size} placeholders.",
+    )
+    # === SSL ===
+    parser.add_argument(
+        "--no-check-certificate",
+        dest="check_certificate",
+        action="store_false",
+        help="Do not verify SSL certificates.",
+    )
+    parser.add_argument(
+        "--ca-certificate",
+        type=str,
+        default=None,
+        help="Path to custom CA certificate file.",
+    )
+    # === 其他 ===
+    parser.add_argument(
+        "--conf-path",
+        type=str,
+        default=None,
+        help="Path to config file (JSON or YAML).",
+    )
+    parser.add_argument(
+        "-q",
+        "--quit",
+        dest="quit_if_exists",
+        action="store_true",
+        help="Quit if the target file already exists.",
+    )
+    parser.add_argument(
+        "--summary-interval",
+        type=float,
+        default=1.0,
+        help="Progress summary output interval in seconds.",
+    )
     parser.add_argument(
         "urls",
         type=str,
@@ -186,6 +291,29 @@ def main(argv=None):
         chunk_timeout=args.chunk_timeout,
         auto_file_renaming=args.no_auto_file_renaming,
         out_dir=args.dir,
+        # 认证与 Cookie
+        http_auth=args.http_auth,
+        cookie_file=args.cookie_file,
+        # 限速
+        max_download_limit=args.max_download_limit,
+        max_overall_download_limit=args.max_overall_download_limit,
+        # 代理
+        proxy=args.proxy,
+        proxy_auth=args.proxy_auth,
+        # 请求头与超时
+        headers=args.header if args.header else None,
+        connect_timeout=args.connect_timeout,
+        max_connection_per_server=args.max_connection_per_server,
+        referer=args.referer,
+        # 回调
+        on_download_complete=args.on_download_complete,
+        # SSL
+        check_certificate=args.check_certificate,
+        ca_certificate=args.ca_certificate,
+        # 其他
+        conf_path=args.conf_path,
+        quit_if_exists=args.quit_if_exists,
+        summary_interval=args.summary_interval,
     )
 
     if args.urls and len(args.urls) == 1 and args.out is not None:

@@ -96,6 +96,62 @@ class Downloader:
         self.chunk_root = await self.rebuild_task()
         if self.chunk_root is None:
             self.chunk_root = await self.build_task()
+        # 单任务限速器（在 Manager 全局限速之外）
+        self._per_task_limiter = None
+        if self.parent.max_download_limit:
+            from .manager import RateLimiter
+            self._per_task_limiter = RateLimiter(self.parent.max_download_limit)
+
+
+    def _build_client_session(self, **overrides) -> aiohttp.ClientSession:
+        """构建统一配置的 aiohttp.ClientSession，用于所有 HTTP 请求"""
+        mgr = self.parent  # Manager 引用
+
+        # 超时配置
+        timeout = aiohttp.ClientTimeout(
+            total=mgr.timeout,
+            connect=mgr.connect_timeout,
+            sock_read=mgr.chunk_timeout or 30,
+        )
+
+        # SSL 配置
+        ssl_context = None
+        if mgr.ca_certificate:
+            import ssl as _ssl
+            ssl_context = _ssl.create_default_context(cafile=mgr.ca_certificate)
+
+        # 连接器（支持单 host 连接数限制）
+        connector_kw = {
+            "limit": 0,
+            "verify_ssl": mgr.check_certificate,
+            "ssl": ssl_context,
+        }
+        if mgr.max_connection_per_server and mgr.max_connection_per_server > 0:
+            connector_kw["limit_per_host"] = mgr.max_connection_per_server
+        connector = aiohttp.TCPConnector(
+            **{k: v for k, v in connector_kw.items() if v is not None}
+        )
+
+        # Cookie
+        cookie_jar = aiohttp.CookieJar()
+        if mgr.cookie_file and os.path.exists(mgr.cookie_file):
+            cookie_jar.load(mgr.cookie_file)
+
+        # 组装 ClientSession 参数
+        kwargs = {
+            "timeout": timeout,
+            "connector": connector,
+            "cookie_jar": cookie_jar,
+            "proxy": mgr.proxy,
+        }
+        if mgr.http_auth:
+            kwargs["auth"] = mgr.http_auth
+        if mgr.proxy_auth:
+            kwargs["proxy_auth"] = mgr.proxy_auth
+        kwargs.update(overrides)
+        return aiohttp.ClientSession(
+            **{k: v for k, v in kwargs.items() if v is not None}
+        )
 
     def __str__(self):
         chunks = []
@@ -117,7 +173,7 @@ class Downloader:
                 md5 = await f.read()
                 return md5.strip()
         elif re.match(r"^(http|https|ftp)://", md5):
-            async with aiohttp.ClientSession() as session:
+            async with self._build_client_session() as session:
                 async with session.get(
                     md5, timeout=self.parent.timeout
                 ) as md5_response:
@@ -135,7 +191,7 @@ class Downloader:
             return None
 
     async def get_file_name(self) -> str:
-        async with aiohttp.ClientSession() as session:
+        async with self._build_client_session() as session:
             cd = self.header_info.get("Content-Disposition")
             if cd:
                 fname = re.findall('.*filename="*(.+)".*', cd)
@@ -153,12 +209,16 @@ class Downloader:
             return fname
 
     async def get_headers(self) -> dict:
-        async with aiohttp.ClientSession() as session:
+        async with self._build_client_session() as session:
+            headers_to_send = {"Accept-Encoding": "identity"}
+            # 合并全局自定义 HTTP 头
+            if self.parent.headers_dict:
+                headers_to_send.update(self.parent.headers_dict)
             async with session.head(
                 self.url,
                 allow_redirects=True,
                 timeout=self.parent.timeout,
-                headers={"Accept-Encoding": "identity"},
+                headers=headers_to_send,
             ) as response:
                 if response.status in (200, 206):
                     return response.headers
@@ -432,6 +492,15 @@ class Downloader:
                 if not parsed:
                     await self.parse_config()
                     parsed = True
+                # quit 模式：目标文件已存在则跳过
+                if self.parent.quit_if_exists and os.path.exists(
+                    os.path.join(self.filepath, self.filename)
+                ):
+                    self._logger.info(
+                        f"File {self.filename} already exists, skipping."
+                    )
+                    self._done = True
+                    return self.url
                 if (
                     self.filename is not None
                     and os.path.exists(os.path.join(self.filepath, self.filename))
@@ -458,10 +527,45 @@ class Downloader:
                         f"Failed to download {self.url} after retries."
                     ) from e
         if self._done:
+            # 下载完成回调
+            if self.parent.on_download_complete:
+                self._run_download_complete_callback()
             self.parent._logger.success(
                 f"Finished download {self.filename} from {self.url}"
             )
             return self.url
+
+    def _run_download_complete_callback(self):
+        """异步执行下载完成回调命令（不阻塞后续任务）"""
+        dest = os.path.join(self.filepath, self.filename)
+        cmd = self.parent.on_download_complete
+        cmd = (cmd.replace("{filename}", self.filename)
+                   .replace("{filepath}", dest)
+                   .replace("{url}", self.url)
+                   .replace("{dir}", self.filepath)
+                   .replace("{size}", str(self.file_size)))
+
+        async def _runner():
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    self._logger.warning(
+                        f"Download complete callback exited with code "
+                        f"{proc.returncode}: {stderr.decode()}"
+                    )
+                else:
+                    self._logger.info(
+                        f"Download complete callback finished: {stdout.decode().strip()}"
+                    )
+            except Exception as e:
+                self._logger.error(f"Download complete callback failed: {e}")
+
+        asyncio.create_task(_runner())
 
     async def _start_download(self):
         tasks = []
@@ -472,7 +576,7 @@ class Downloader:
                     f"Downloading {self.filename}", total=None, dl=len(tasks)
                 )
                 while not self._downloaded:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(self.parent.summary_interval)
             else:
                 self.task = self.parent._progress.add_task(
                     f"Downloading {self.filename}", total=self.file_size, dl=len(tasks)
@@ -485,9 +589,7 @@ class Downloader:
                     self.parent._progress.update(
                         self.task, completed=completed, dl=len(tasks)
                     )
-                    await asyncio.sleep(1)
-                async with self.lock:
-                    completed = sum(self.chunk_root)
+                    await asyncio.sleep(self.parent.summary_interval)
                 self.parent._progress.update(
                     self.task, completed=completed, dl=len(tasks)
                 )

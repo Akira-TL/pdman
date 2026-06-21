@@ -9,15 +9,15 @@ import random
 import re
 import os
 import sys
-import traceback
-import yaml
-import json
 import time
+import json
 import shutil
 import asyncio
 import hashlib
+import traceback
 import aiohttp
 import aiofiles
+import yaml
 from yarl import URL
 from glob import glob
 from rich.text import Text
@@ -40,6 +40,40 @@ from .downloader import Downloader
 from .utils import auto_sync
 
 
+class RateLimiter:
+    """令牌桶限速器，用于单任务或全局下载限速"""
+
+    def __init__(self, max_rate: int | None):
+        """
+        args:
+            max_rate: 最大速率（字节/秒），None 表示不限速
+        """
+        self.max_rate = max_rate
+        self._tokens = float(max_rate) if max_rate else float("inf")
+        self._last_refill = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, byte_count: int) -> None:
+        """获取 byte_count 字节的下载许可，超出速率时自动等待"""
+        if self.max_rate is None:
+            return
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_refill
+            self._tokens = min(
+                float(self.max_rate),
+                self._tokens + self.max_rate * elapsed,
+            )
+            self._last_refill = now
+            if byte_count > self._tokens:
+                wait_time = (byte_count - self._tokens) / self.max_rate
+                await asyncio.sleep(wait_time)
+                self._tokens = 0.0
+                self._last_refill = time.monotonic()
+            else:
+                self._tokens -= byte_count
+
+
 class Manager:
     """
     ### 负责管理下载任务，提供添加 URL、启动下载、停止下载等功能。
@@ -53,7 +87,7 @@ class Manager:
         debug: 是否启用调试模式
         check_integrity: 是否启用完整性校验
         continue_download: 是否启用断点续传
-        max_concurrent_downloads: 最大并发下载数
+        max_concurrent_downloads: 最大并发下载数（单任务内部分块数）
         min_split_size: 最小分块大小，单位支持 K/M/G
         force_sequential: 是否强制顺序下载
         tmp_dir: 临时文件目录
@@ -62,6 +96,29 @@ class Manager:
         chunk_timeout: 分块下载超时时间，单位秒
         auto_file_renaming: 是否启用自动文件重命名以避免冲突
         out_dir: 下载文件输出目录，默认为当前工作目录
+        # 认证与 Cookie
+        http_auth: HTTP 认证，格式 "user:pass"
+        cookie_file: Netscape/Mozilla 格式 Cookie 文件路径
+        # 限速
+        max_download_limit: 单任务下载限速（字节/秒），支持 K/M/G
+        max_overall_download_limit: 全局下载限速（字节/秒），支持 K/M/G
+        # 代理
+        proxy: HTTP/HTTPS 代理 URL
+        proxy_auth: 代理认证，格式 "user:pass"
+        # 请求头与超时
+        headers: 自定义 HTTP 头列表，每个元素为 "Key: Value"
+        connect_timeout: 连接超时（秒），独立于读写超时
+        max_connection_per_server: 单服务器最大连接数，0 表示不限制
+        referer: HTTP Referer 头
+        # 回调
+        on_download_complete: 下载完成回调 shell 命令，支持占位符
+        # SSL
+        check_certificate: 是否验证 SSL 证书
+        ca_certificate: 自定义 CA 证书文件路径
+        # 其他
+        conf_path: 配置文件路径（JSON/YAML）
+        quit_if_exists: 目标文件已存在则跳过下载
+        summary_interval: 进度刷新间隔（秒）
 
     attributes:
         config: 更新配置项的方法
@@ -95,6 +152,29 @@ class Manager:
         chunk_timeout: int = 10,
         auto_file_renaming: bool = True,
         out_dir: str = None,
+        # === 认证与 Cookie ===
+        http_auth: str = None,
+        cookie_file: str = None,
+        # === 限速 ===
+        max_download_limit: str | int = None,
+        max_overall_download_limit: str | int = None,
+        # === 代理 ===
+        proxy: str = None,
+        proxy_auth: str = None,
+        # === 请求头与超时 ===
+        headers: list[str] = None,
+        connect_timeout: int = None,
+        max_connection_per_server: int = 0,
+        referer: str = None,
+        # === 回调 ===
+        on_download_complete: str = None,
+        # === SSL ===
+        check_certificate: bool = True,
+        ca_certificate: str = None,
+        # === 其他 ===
+        conf_path: str = None,
+        quit_if_exists: bool = False,
+        summary_interval: float = 1.0,
     ):
         self.max_downloads = max_downloads
         self.timeout = timeout
@@ -125,6 +205,30 @@ class Manager:
         self.retry_wait = retry_wait
         self.auto_file_renaming = auto_file_renaming
         self.out_dir = out_dir
+        # === 认证与 Cookie ===
+        self.http_auth = http_auth
+        self.cookie_file = cookie_file
+        # === 限速 ===
+        self.max_download_limit = max_download_limit
+        self.max_overall_download_limit = max_overall_download_limit
+        self._global_limiter: RateLimiter | None = None
+        # === 代理 ===
+        self.proxy = proxy
+        self.proxy_auth = proxy_auth
+        # === 请求头与超时 ===
+        self.headers = headers
+        self.connect_timeout = connect_timeout
+        self.max_connection_per_server = max_connection_per_server
+        self.referer = referer
+        # === 回调 ===
+        self.on_download_complete = on_download_complete
+        # === SSL ===
+        self.check_certificate = check_certificate
+        self.ca_certificate = ca_certificate
+        # === 其他 ===
+        self.conf_path = conf_path
+        self.quit_if_exists = quit_if_exists
+        self.summary_interval = summary_interval
 
         self._urls_lock = asyncio.Lock()
         self._urls: dict = {}  # {url: Downloader item, ...}
@@ -139,23 +243,34 @@ class Manager:
             TimeElapsedColumn(),
             TimeRemainingColumn(),
             console=self._console,
+            refresh_per_second=1.0 / max(self.summary_interval, 0.1),
         )
         self._downloader_main = None
         self._downloaders = []
+        # 先设置 summary_interval 再调用 _parse_config（这样 _parse_config 可以用）
         self._parse_config()
 
     def config(self, **kwargs):
-        need_reparse_config = False
+        need_reparse_logging = False
+        need_reparse_download = False
+        # 需要重新解析下载参数的配置项
+        reparse_keys = {
+            "max_downloads", "max_concurrent_downloads", "min_split_size",
+            "chunk_retry_speed", "force_sequential", "max_download_limit",
+            "max_overall_download_limit", "http_auth", "proxy_auth", "headers",
+            "max_connection_per_server", "summary_interval",
+        }
         for k, v in kwargs.items():
             if hasattr(self, k) and not k.startswith("_"):
                 setattr(self, k, v)
-                # 只有涉及日志的配置变更才触发 _parse_config 中的日志重置
                 if k in ("debug", "log_path"):
-                    need_reparse_config = True
-        if need_reparse_config:
+                    need_reparse_logging = True
+                if k in reparse_keys:
+                    need_reparse_download = True
+        if need_reparse_logging:
             self._reparse_logging()
-        # 重新解析非日志的配置项（大小转换、并发限制等）
-        self._reparse_download_params()
+        if need_reparse_download:
+            self._reparse_download_params()
 
     def _parse_config(self) -> None:
         """
@@ -192,7 +307,7 @@ class Manager:
             )
 
     def _reparse_download_params(self) -> None:
-        """重新解析下载参数（大小转换、并发限制等）"""
+        """重新解析下载参数（大小转换、并发限制、认证信息等）"""
         self.max_downloads = int(self.max_downloads)
         if self.max_downloads < 1:
             self.max_downloads = 1
@@ -215,6 +330,83 @@ class Manager:
         if self.force_sequential:
             self.max_concurrent_downloads = 1
             self._logger.info("Force sequential download enabled.")
+        # 限速解析
+        self.max_download_limit = self._parse_size(self.max_download_limit)
+        self.max_overall_download_limit = self._parse_size(self.max_overall_download_limit)
+        self._global_limiter = (
+            RateLimiter(self.max_overall_download_limit)
+            if self.max_overall_download_limit
+            else None
+        )
+        # HTTP 认证解析（"user:pass" → aiohttp.BasicAuth）
+        if self.http_auth and isinstance(self.http_auth, str):
+            if ":" in self.http_auth:
+                user, pwd = self.http_auth.split(":", 1)
+                self.http_auth = aiohttp.BasicAuth(login=user, password=pwd)
+            else:
+                self.http_auth = aiohttp.BasicAuth(login=self.http_auth, password="")
+        # 代理认证解析
+        if self.proxy_auth and isinstance(self.proxy_auth, str):
+            if ":" in self.proxy_auth:
+                user, pwd = self.proxy_auth.split(":", 1)
+                self.proxy_auth = aiohttp.BasicAuth(login=user, password=pwd)
+            else:
+                self.proxy_auth = aiohttp.BasicAuth(login=self.proxy_auth, password="")
+        # 自定义 HTTP 头解析（"Key: Value" → dict）
+        self.headers_dict: dict[str, str] = {}
+        if self.headers:
+            if isinstance(self.headers, list):
+                for h in self.headers:
+                    if ":" in h:
+                        k, v = h.split(":", 1)
+                        self.headers_dict[k.strip()] = v.strip()
+                    else:
+                        self._logger.warning(
+                            f"Ignoring malformed header (missing colon): {h}"
+                        )
+            elif isinstance(self.headers, dict):
+                self.headers_dict = dict(self.headers)
+        # 连接数上限校验
+        if self.max_connection_per_server < 0:
+            self.max_connection_per_server = 0
+            self._logger.warning(
+                "max_connection_per_server cannot be negative. Setting to 0 (unlimited)."
+            )
+        # 进度刷新间隔
+        if self.summary_interval < 0.1:
+            self.summary_interval = 0.1
+        # 加载配置文件（如果指定了 conf_path 且尚未加载）
+        if self.conf_path is not None:
+            self._load_config_file()
+
+    def _load_config_file(self) -> None:
+        """从配置文件加载参数（JSON/YAML），CLI 参数优先级高于配置文件"""
+        if not self.conf_path or not os.path.exists(self.conf_path):
+            return
+        try:
+            with open(self.conf_path, "r") as f:
+                suffix = os.path.splitext(self.conf_path)[1].lower()
+                if suffix in (".yaml", ".yml"):
+                    config_data = yaml.safe_load(f) or {}
+                elif suffix == ".json":
+                    config_data = json.load(f)
+                else:
+                    self._logger.warning(
+                        f"Unsupported config file format: {suffix}, skipping."
+                    )
+                    return
+            if not isinstance(config_data, dict):
+                self._logger.warning("Config file content is not a dict, skipping.")
+                return
+            # 配置文件值作为默认值，不覆盖 CLI 已设置的非 None 值
+            for key, value in config_data.items():
+                if hasattr(self, key) and not key.startswith("_"):
+                    current = getattr(self, key)
+                    # 只有当前值为默认的假值时才覆盖
+                    if current in (None, False, 0, "", [], {}):
+                        setattr(self, key, value)
+        except Exception as e:
+            self._logger.warning(f"Failed to load config file: {e}")
 
     def _parse_size(self, size_str: str) -> int:
         """
@@ -438,7 +630,14 @@ class Manager:
         return list(self._urls.keys())
 
     def __str__(self):
-        return f"Manager(threads={self.max_downloads}, timeout={self.timeout}, retry={self.retry}, debug={self.debug}, continue_download={self.continue_download}, max_concurrent_downloads={self.max_concurrent_downloads}, min_split_size={self.min_split_size})"
+        return (
+            f"Manager(max_downloads={self.max_downloads}, timeout={self.timeout}, "
+            f"retry={self.retry}, debug={self.debug}, "
+            f"continue_download={self.continue_download}, "
+            f"max_concurrent_downloads={self.max_concurrent_downloads}, "
+            f"min_split_size={self.min_split_size}, "
+            f"proxy={self.proxy})"
+        )
 
     def __del__(self):
         self.stop_loop()

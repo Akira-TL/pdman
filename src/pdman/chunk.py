@@ -100,6 +100,12 @@ class Chunk:
                         continue_flag = True
                     window_bytes = 0
                     window_start = now
+            # 单任务限速
+            if self.parent._per_task_limiter:
+                await self.parent._per_task_limiter.acquire(len(data))
+            # 全局限速
+            if self.parent.parent._global_limiter:
+                await self.parent.parent._global_limiter.acquire(len(data))
             pos += len(data)
         # 处理剩余窗口数据
         if window_bytes > 0 and not continue_flag:
@@ -140,15 +146,19 @@ class Chunk:
         assert self.end is not None or self.size >= 0
         file_mode = "ab" if os.path.exists(self.chunk_path) else "wb"
         async with (
-            aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(sock_read=30)
-            ) as session,
+            self.parent._build_client_session() as session,
             aiofiles.open(self.chunk_path, file_mode) as f,
         ):
             for _ in range(self.parent.parent.retry):
                 if os.path.exists(self.chunk_path) and self._is_complete():
                     return self
                 headers = {}  # 每次重试迭代使用干净的 headers 字典
+                # 合并全局自定义 HTTP 头
+                if self.parent.parent.headers_dict:
+                    headers.update(self.parent.parent.headers_dict)
+                # 设置 Referer
+                if self.parent.parent.referer:
+                    headers.setdefault("Referer", self.parent.parent.referer)
                 while True:
                     try:
                         self._apply_range_header(headers)
