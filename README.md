@@ -6,21 +6,32 @@
 
 ## 功能概览
 
-- 多连接分块下载：同一 URL 通过 Range 头拆分为多个分块并发下载。
-- 断点续传：每个任务使用 `.pdman.<sha>` 目录保存分块和 `.pdman` 元信息，配合 `--continue` 恢复下载。
-- 下载进度展示：使用 rich 展示每个文件的进度条、速度、已用时间和剩余时间。
-- 失败重试：支持整体任务重试（`--retry`）和分块级重试 + 低速重启（`--chunk-retry-speed`）。
-- 并发控制：
+- **多连接分块下载**：同一 URL 通过 Range 头拆分为多个分块并发下载，动态分块提升利用率。
+- **断点续传**：每个任务使用 `.pdman.<sha>` 目录保存分块和 `.pdman` 元信息，配合 `--continue` 恢复下载。
+- **下载进度展示**：使用 rich 展示每个文件的进度条、速度、已用时间和剩余时间，支持可配置刷新间隔。
+- **失败重试**：支持整体任务重试（`--retry`）和分块级重试 + 低速重启（`--chunk-retry-speed`），滑动窗口平均速度避免误触发。
+- **并发控制**：
   - `--max-downloads` 控制同时下载的 URL 个数；
   - `--max-concurrent-downloads` 控制单个 URL 内部并发的分块数；
-  - `--force-sequential` 强制单 URL 顺序下载（相当于将 `max_concurrent_downloads` 设为 1）。
-- 日志：
-  - 全局日志输出到终端或指定文件；
-  - 每个 URL 额外有一个独立的 `.pdman.<sha>.log` 日志（位于对应下载目录内）。
-- 完整性校验（MD5）：
+  - `--force-sequential` 强制单 URL 顺序下载；
+  - `--max-connection-per-server` 限制单服务器并发连接数。
+- **速度限制**：支持单任务（`--max-download-limit`）及全局（`--max-overall-download-limit`）令牌桶限速，避免占满带宽。
+- **HTTP 认证**：支持 Basic/Digest 认证（`--http-auth user:pass`）。
+- **代理支持**：HTTP/HTTPS 代理及代理认证（`--proxy` / `--proxy-auth`）。
+- **Cookie 支持**：从 Netscape/Mozilla 格式文件加载 Cookie（`--cookie-file`），兼容浏览器导出格式。
+- **自定义请求头**：可重复 `--header "Key: Value"` 添加任意 HTTP 头，常用于 Referer / Authorization 等场景。
+- **连接与 SSL 控制**：独立连接超时（`--connect-timeout`）、SSL 证书验证开关（`--no-check-certificate`）、自定义 CA 证书（`--ca-certificate`）。
+- **下载完成回调**：`--on-download-complete` 指定 shell 命令，支持 `{filename}` 等占位符，可用于通知、后处理等自动流程。
+- **配置文件支持**：`--conf-path` 加载 JSON/YAML 配置，CLI 参数优先级更高。
+- **日志**：
+  - 全局日志输出到终端或指定文件（`-l/--log`）；
+  - 每个 URL 额外有一个独立的 `.pdman.<sha>.log` 日志（位于对应下载目录内）；
+  - `--debug` 启用详细调试日志。
+- **完整性校验（MD5）**：
   - 若任务中提供 `md5` 字段并启用 `--check-integrity`，下载完成后会对合并后的文件做 MD5 校验。
   - `md5` 可为 32 位 MD5 字符串、本地文件路径或一个返回 MD5 字符串的 URL。
-- 批量下载任务文件：支持 JSON / YAML / 纯文本三种格式。
+- **批量下载任务文件**：支持 JSON / YAML / 纯文本三种格式（`-i/--input-file`）。
+- **quit 模式**：`-q` 目标文件已存在则跳过，适合增量备份场景。
 
 ---
 
@@ -162,54 +173,89 @@ pdman -i tasks.yaml
 ### 通用
 
 - [x] `-v, --version`：打印版本号后退出。
-- [x] `-l, --log PATH`：日志文件路径。
+- [x] `-l, --log PATH`：日志文件路径（`-` 表示 stdout）。
 - [x] `--debug`：启用调试模式，日志级别提升为 DEBUG。
+- [x] `--conf-path PATH`：从 JSON/YAML 配置文件加载默认参数（CLI 参数优先级更高）。
 
 ### 下载目标与输出
 
 - [x] `-d, --dir DIR`：指定下载目录。
 - [x] `-o, --out NAME`：指定输出文件名，若 url 多于 1 无效。
+- [x] `-q, --quit`：如果目标文件已存在则跳过下载。
 - [x] 位置参数 `urls...`：要下载的 URL，可以传多个。
 
 ### 下载控制
 
 - [x] `-N, --max-downloads INT`：同时下载的 URL 最大数量（默认 4）。
 - [x] `-x, --max-concurrent-downloads INT`：每个 URL 内部并发的分块下载数量（默认 5）。
-- [x] `-Z, --force-sequential`：强制顺序下载：将单个 URL 的并发数限制为 1。
-- [x] `-k, --min-split-size SIZE`：分块最小尺寸（默认 `1M`；支持 K/M/G 后缀）。当文件较小或 SIZE 过大时，可能只会产生一个分块。
-- [x] `-r, --retry INT`：整体任务与分块级别的重试次数（默认 3）。
-- [x] `-W, --retry-wait SECONDS`：重试前的等待时间（默认 5 秒）。
-- [x] `--timeout SECONDS`：HEAD 请求和部分其他网络操作的超时时间（默认 60 秒）。
-- [x] `--chunk-timeout SECONDS`：每个分块下载请求的超时时间（默认 10 秒）。
-- [x] `--chunk-retry-speed SIZE`：当分块下载速度低于该值（字节/秒）时，会重启该分块的下载；支持 K/M/G 后缀。留空则不启用此机制。
-- [x] `-c, --continue`：启用断点续传，根据 `.pdm` 元信息和已有分块续传。
-- [x] `--tmp DIR`：指定临时分块目录的根路径；不指定时，默认在对应下载目录下创建 `.pdm.<sha>`。
+- [x] `-Z, --force-sequential`：强制顺序下载。
+- [x] `-k, --min-split-size SIZE`：分块最小尺寸（默认 `1M`；支持 K/M/G 后缀）。
+- [x] `--max-connection-per-server INT`：单服务器最大连接数（默认 0 = 不限制）。
+- [x] `-r, --retry INT`：失败重试次数（默认 3）。
+- [x] `-W, --retry-wait SECONDS`：重试等待时间（默认 5 秒）。
+- [x] `--timeout SECONDS`：HTTP 请求超时时间（默认 60 秒）。
+- [x] `--connect-timeout SECONDS`：连接建立超时，独立于读写超时。
+- [x] `--chunk-timeout SECONDS`：分块下载超时时间（默认 10 秒）。
+- [x] `--chunk-retry-speed SIZE`：分块低速阈值（字节/秒），低于该值重启分块。
+- [x] `--max-download-limit SIZE`：单任务下载限速（支持 K/M/G 后缀）。
+- [x] `--max-overall-download-limit SIZE`：全局下载限速（所有任务合计）。
+- [x] `-c, --continue`：启用断点续传。
+- [x] `--tmp DIR`：分块临时文件根目录。
+
+### 认证与代理
+
+- [x] `--http-auth AUTH`：HTTP 认证，格式 `user:pass`。
+- [x] `--cookie-file PATH`：从 Netscape/Mozilla 格式文件加载 Cookie。
+- [x] `--proxy URL`：HTTP/HTTPS 代理地址。
+- [x] `--proxy-auth AUTH`：代理认证，格式 `user:pass`。
+
+### 请求头
+
+- [x] `--header "Key: Value"`：自定义 HTTP 请求头，可重复使用。
+- [x] `--referer URL`：设置 HTTP Referer 头。
+- [x] `-ua, --user-agent STRING`：设置 User-Agent（默认 `PDMAN-Downloader/1.0`）。
+
+### SSL / TLS
+
+- [x] `--no-check-certificate`：不验证 SSL 证书。
+- [x] `--ca-certificate PATH`：使用自定义 CA 证书文件。
 
 ### 完整性与校验
 
-- [x] `-V, --check-integrity`：启用 MD5 完整性校验。仅当任务文件中为该 URL 提供了 `md5` 字段时才会实际校验。
+- [x] `-V, --check-integrity`：启用 MD5 完整性校验。
 
-### 网络与 UA
+### 回调与进度
 
-- [x] `-ua, --user-agent STRING`：当前代码只在获取文件名的 HEAD 请求中设置 UA，真正的下载请求尚未使用该 UA。默认值：`PDM-Downloader/1.0`。
+- [x] `--on-download-complete CMD`：下载完成后执行的 shell 命令，支持占位符。
+- [x] `--summary-interval SECS`：进度刷新间隔（默认 1.0 秒）。
 
 ### 批量任务与日志
 
-- [x] `-i, --input-file FILE`：从 FILE 读取下载任务；支持 JSON/YAML/纯文本，参数可重复。
-- [x] `--auto-file-renaming BOOL`：若目标目录下已存在同名文件，则自动追加 `.1`、`.2` 等序号进行重命名（默认 `True`）。
+- [x] `-i, --input-file FILE`：从 FILE 读取下载任务；支持 JSON/YAML/纯文本，可重复。
+- [x] `--auto-file-renaming BOOL`：同名文件自动追加序号重命名（默认 True）。
 
 ---
 
 ## 当前进度
 
 - [x] 异步下载框架与分块调度
-- [x] rich 进度条与 loguru 日志集成
-- [x] 分块拆分、动态分块与最小分块尺寸控制
+- [x] 动态分块与最小分块尺寸控制
 - [x] 断点续传元信息与分块重建
 - [x] 批量任务（JSON / YAML / 纯文本）
-- [x] MD5 完整性校验（基于任务文件中的 md5 字段）
-- [x] 分块下载低速自动重启策略（`--chunk-retry-speed`）
-- [x] 下载与分块层面的重试与等待（`--retry`、`--retry-wait`）
-- [x] 全局 `-d/--dir`、`-o/--out`、`-ua/--user-agent`
+- [x] MD5 完整性校验
+- [x] 分块低速自动重启（滑动窗口平均速度）
+- [x] 并发控制（任务级 / 分块级 / 单 host 级）
+- [x] HTTP 认证（Basic/Digest）
+- [x] Cookie 文件加载（Netscape/Mozilla 格式）
+- [x] 单任务 / 全局令牌桶限速
+- [x] HTTP/HTTPS 代理及认证
+- [x] 自定义请求头（可重复 --header）
+- [x] 独立连接超时
+- [x] SSL 证书验证控制
+- [x] 下载完成回调钩子
+- [x] 配置文件支持（JSON/YAML）
+- [x] quit 模式
+- [x] 可配置进度刷新间隔
+- [x] rich 进度条与 loguru 日志集成
 
 ---
