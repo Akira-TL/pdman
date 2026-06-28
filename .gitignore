@@ -11,3 +11,4 @@ dist/
 _pdm.py
 # pdm/
 uv.lock
+.vscode/settings.json
