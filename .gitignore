@@ -10,6 +10,7 @@ download.log
 build/
 dist/
 .venv/
+discuss/
 _pdm.py
 # pdm/
 uv.lock*
