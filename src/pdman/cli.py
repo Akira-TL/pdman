@@ -9,9 +9,16 @@ import os
 import sys
 import argparse
 import asyncio
+from importlib.metadata import PackageNotFoundError, version as package_version
+
 from .manager import Manager
 
-version = "0.3.1"
+
+def get_version() -> str:
+    try:
+        return package_version("pdman")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def main(argv=None):
@@ -20,7 +27,7 @@ def main(argv=None):
         "-v",
         "--version",
         action="version",
-        version=f"PythonDownloadManager(PDMAN) version {version}",
+        version=f"PythonDownloadManager(PDMAN) version {get_version()}",
         help="Print the version number and exit.",
     )
     parser.add_argument(

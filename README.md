@@ -273,11 +273,7 @@ uv run python -m build
 uv run python -m twine check dist/*
 ```
 
-发布前需要保持以下版本一致：
-
-- `pyproject.toml` 中的 `[project].version`
-- `src/pdman/cli.py` 中 `pdman --version` 输出的版本
-- Git tag，例如 `v0.3.1`
+发布前只需要在 `pyproject.toml` 中更新 `[project].version`，CLI 的 `pdman --version` 会从安装包 metadata 自动读取该版本。随后确认 Git tag 与项目版本对应，例如 `0.3.1` 对应 `v0.3.1`。
 
 仓库中的 `.github/workflows/pypi.yml` 会在 GitHub Release 发布后自动构建并发布到 PyPI。
 

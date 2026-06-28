@@ -252,9 +252,9 @@ uv run python -m twine check dist/*
 ```bash
 git status --short --branch
 grep -n 'version =' pyproject.toml
-grep -n '^version =' src/pdman/cli.py
 git tag --list --sort=-v:refname | head
 uv run python -m pytest -q src/pdman/test.py
+uv run pdman --version
 uv run python -m build
 uv run python -m twine check dist/*
 ```
@@ -262,7 +262,8 @@ uv run python -m twine check dist/*
 需要确认：
 
 - 工作区干净。
-- `pyproject.toml` 版本与 `src/pdman/cli.py` 中的 CLI 版本一致。
+- `pyproject.toml` 是唯一版本源，CLI 通过安装包 metadata 读取版本。
+- `pdman --version` 输出与 `pyproject.toml` 版本一致。
 - 新版本 tag 尚不存在，例如 `v0.3.1`。
 - 测试通过。
 - `dist/` 中的 sdist 和 wheel 构建成功。
