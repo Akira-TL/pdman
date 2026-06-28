@@ -4,11 +4,12 @@ download.log
 .pdm*
 *tmp*
 .vscode/launch.json
+.vscode/settings.json
 *.egg-info/
 *.dist-info/
 build/
 dist/
+.venv/
 _pdm.py
 # pdm/
-uv.lock
-.vscode/settings.json
+uv.lock*
