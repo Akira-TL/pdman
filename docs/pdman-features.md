@@ -229,7 +229,54 @@ uv run pdman --version
 
 ---
 
-## 7. 内部配置链路
+## 7. Runtime 目录、history 与 current run
+
+v0.4.0 引入 runtime 目录管理，目标是把 payload 临时文件和非 payload 元数据分开：
+
+```text
+/tmp/pdman/
+  runs/
+    <run-id>/
+      chunks/
+        <task-id>/
+      locks/
+
+~/.cache/pdman/
+  history.jsonl
+  active/
+    <run-id>.json
+  runs/
+    <run-id>.json
+  metadata/
+```
+
+目录职责：
+
+| 目录 | 内容 |
+| --- | --- |
+| `/tmp/pdman/runs/<run-id>/chunks/<task-id>/` | 当前 run 的 chunk 文件和 `.pdm` 元数据 |
+| `~/.cache/pdman/history.jsonl` | 每个任务结束后追加一行任务结果 |
+| `~/.cache/pdman/active/<run-id>.json` | 当前运行中的 run 状态，只在运行中存在 |
+| `~/.cache/pdman/runs/<run-id>.json` | run 结束后的最终 summary |
+| `~/.cache/pdman/metadata/` | 后续版本预留的非 payload 元数据目录 |
+
+临时目录策略：
+
+| 参数 | 行为 |
+| --- | --- |
+| `--tmp DIR` | 最高优先级，使用用户指定目录下的 `.pdman.<task-id>` |
+| `--tmp-policy auto` | 默认，优先使用系统临时目录；空间不足时回退到目标目录 |
+| `--tmp-policy system` | 强制使用系统临时目录 |
+| `--tmp-policy target` | 保留 v0.3.x 行为，在目标目录创建 `.pdman.<task-id>` |
+| `--cache-dir DIR` | 覆盖默认 `~/.cache/pdman` |
+
+兼容性说明：启用 `--continue` 且目标目录中存在旧版 `.pdman.<task-id>/.pdm` 时，pdman 会优先使用旧目录继续下载，避免破坏 v0.3.x 已存在的续传状态。
+
+v0.4.0 只提供 runtime 目录和 history/current-run 基础，不提供 history 查询命令、queue 命令、daemon 模式、JSON/JSONL 输出或 agent event stream。这些内容放到后续 0.4.x/0.9.x 修订版本。
+
+---
+
+## 8. 内部配置链路
 
 当前 CLI 到下载执行的大致链路为：
 
@@ -259,7 +306,7 @@ Downloader.merge()
 
 ---
 
-## 7. 本地开发环境
+## 9. 本地开发环境
 
 推荐使用 `uv`：
 
@@ -292,7 +339,7 @@ uv run python -m twine check dist/*
 
 ---
 
-## 8. 发布前检查
+## 10. 发布前检查
 
 发布前至少完成以下检查：
 
@@ -334,7 +381,7 @@ GitHub Release 发布后，`.github/workflows/pypi.yml` 会触发自动构建并
 
 ---
 
-## 9. 文档维护原则
+## 11. 文档维护原则
 
 - `README.md` 只放面向用户的安装、快速开始、常用命令和项目约定。
 - `docs/` 放更完整的功能说明、内部链路、开发与发布检查。

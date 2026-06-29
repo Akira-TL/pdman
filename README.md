@@ -193,6 +193,39 @@ pdman --check-integrity -i tasks.yaml
 
 `md5` 可以是 32 位 MD5 字符串、本地文件路径，或返回 MD5 文本的 URL。启用完整性校验后，MD5 不匹配会记录为 `failed`，并使 CLI 返回非零退出码。
 
+### Runtime 目录与历史记录
+
+v0.4.0 开始，pdman 默认把分块临时文件放在系统临时目录下的 run 目录中，而不是下载目标目录：
+
+```text
+/tmp/pdman/runs/<run-id>/chunks/<task-id>/
+```
+
+非 payload 元数据会写入 cache 目录：
+
+```text
+~/.cache/pdman/history.jsonl
+~/.cache/pdman/runs/<run-id>.json
+~/.cache/pdman/active/<run-id>.json
+```
+
+`active/<run-id>.json` 只在运行中存在；运行结束后会写入最终 run summary，并追加任务历史记录。
+
+临时目录策略：
+
+```bash
+pdman --tmp-policy auto   "https://example.com/file.bin"
+pdman --tmp-policy target "https://example.com/file.bin"
+pdman --tmp /data/tmp     "https://example.com/file.bin"
+pdman --cache-dir /data/cache/pdman "https://example.com/file.bin"
+```
+
+- `--tmp` 优先级最高。
+- `--tmp-policy auto` 是默认值，优先使用系统临时目录。
+- `--tmp-policy system` 强制使用系统临时目录。
+- `--tmp-policy target` 保留旧行为，在目标目录旁创建 `.pdman.<sha>`。
+- `--cache-dir` 覆盖默认 `~/.cache/pdman`。
+
 ### 任务结果与退出码
 
 每次运行结束后，pdman 会汇总任务结果：

@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import socket
 import threading
 import time
@@ -167,6 +168,34 @@ def test_slow_head_succeeds_after_progress_delay(tmp_path):
         asyncio.run(manager.download())
 
         assert (tmp_path / "slow.bin").read_bytes() == PAYLOAD
+
+
+def test_download_writes_runtime_history_and_cleans_active_run(tmp_path):
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            cache_dir=str(cache_dir),
+            log_path=None,
+        )
+        manager.append(
+            server.url("/normal.bin"),
+            file_name="runtime.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "runtime.bin").read_bytes() == PAYLOAD
+        assert not manager.runtime_paths.active_run_path.exists()
+        assert manager.runtime_paths.final_run_path.exists()
+        assert not manager.runtime_paths.run_dir.exists()
+        assert not list(tmp_path.glob(".pdman.*"))
+        history_record = json.loads(
+            manager.runtime_paths.history_path.read_text().splitlines()[0]
+        )
+        assert history_record["filename"] == "runtime.bin"
+        assert history_record["status"] == "completed"
 
 
 def test_slow_head_is_failed_after_connection_timeout(tmp_path):
