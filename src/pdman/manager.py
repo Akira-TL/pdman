@@ -578,15 +578,11 @@ class Manager:
                     continue
                 downloading[url] = True
                 assert isinstance(download_entity, Downloader)
-                if len(self._downloaders) <= self.max_downloads:
-                    self._downloaders.append(
-                        asyncio.create_task(download_entity.start_download())
-                    )
-                else:
+                while len(self._downloaders) >= self.max_downloads:
                     await self.wait_one()
-                    self._downloaders.append(
-                        asyncio.create_task(download_entity.start_download())
-                    )
+                self._downloaders.append(
+                    asyncio.create_task(download_entity.start_download())
+                )
                 self._logger.debug(f"Starting download for {url}")
             await self.wait()
             await asyncio.sleep(0.1)
