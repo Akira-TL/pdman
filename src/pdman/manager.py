@@ -37,7 +37,7 @@ from rich.progress import (
 )
 from .chunk import Chunk
 from .downloader import Downloader
-from .runtime import RuntimePaths
+from .runtime import RuntimePaths, task_result_to_record, utc_now_iso
 from .status import TaskResult, TaskStatus
 from .utils import auto_sync
 
@@ -260,6 +260,9 @@ class Manager:
         self._downloaders = []
         self.results: list[TaskResult] = []
         self.exit_code = 0
+        self.run_started_at: str | None = None
+        self.run_finished_at: str | None = None
+        self._runtime_active = False
         # 先设置 summary_interval 再调用 _parse_config（这样 _parse_config 可以用）
         self._parse_config()
 
@@ -593,11 +596,73 @@ class Manager:
             value /= 1024
         return f"{size} B"
 
+    def _task_counts(self) -> dict[str, int]:
+        return {
+            "completed": len(
+                [r for r in self.results if r.status == TaskStatus.COMPLETED]
+            ),
+            "skipped": len(
+                [r for r in self.results if r.status == TaskStatus.SKIPPED]
+            ),
+            "failed": len(
+                [r for r in self.results if r.status == TaskStatus.FAILED]
+            ),
+        }
+
+    def _run_payload(self, status: str) -> dict:
+        return {
+            "run_id": self.run_id,
+            "pid": os.getpid(),
+            "status": status,
+            "started_at": self.run_started_at,
+            "finished_at": self.run_finished_at,
+            "tmp_policy": self.tmp_policy,
+            "tmp_root": str(self.runtime_paths.run_dir),
+            "cache_root": str(self.runtime_paths.cache_root),
+            "task_counts": self._task_counts(),
+            "exit_code": self.exit_code,
+        }
+
+    def _write_active_run(self) -> None:
+        if self._runtime_active:
+            self.runtime_paths.write_active_run(self._run_payload("running"))
+
+    def _start_runtime_run(self) -> None:
+        self.runtime_paths.ensure()
+        self.run_started_at = utc_now_iso()
+        self.run_finished_at = None
+        self._runtime_active = True
+        self._write_active_run()
+
+    def _finish_runtime_run(self) -> None:
+        self.run_finished_at = utc_now_iso()
+        self.runtime_paths.write_final_run(self._run_payload("finished"))
+        self.runtime_paths.clear_active_run()
+        self.runtime_paths.cleanup_run_dir()
+        self._runtime_active = False
+
+    @staticmethod
+    def _task_id_for_url(url: str) -> str:
+        return hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
+
     def record_task_result(self, result) -> None:
         if isinstance(result, TaskResult):
             self.results.append(result)
             if result.status == TaskStatus.FAILED:
                 self.exit_code = 1
+            if self._runtime_active:
+                finished_at = utc_now_iso()
+                task_id = self._task_id_for_url(result.url)
+                self.runtime_paths.append_history(
+                    task_result_to_record(
+                        run_id=self.run_id,
+                        task_id=task_id,
+                        result=result,
+                        started_at=self.run_started_at,
+                        finished_at=finished_at,
+                    )
+                )
+                self._write_active_run()
 
     def summarize_results(self) -> str:
         completed = [
@@ -661,11 +726,13 @@ class Manager:
         开始下载任务。
         """
         self._logger.debug(self)
+        self._start_runtime_run()
         self._downloader_main = asyncio.create_task(self._download_once())
         try:
             await self._downloader_main
         finally:
             self._downloader_main = None
+            self._finish_runtime_run()
         self.print_summary()
 
     async def _download_once(self, downloading=None) -> None:

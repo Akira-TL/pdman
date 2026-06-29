@@ -1,4 +1,5 @@
 import asyncio
+import json
 import types
 
 from pdman.downloader import Downloader
@@ -76,3 +77,41 @@ def test_manager_summary_counts_task_results():
     assert "existing.bin - target already exists" in summary
     assert "status.bin - HTTP 503 during header check" in summary
     assert manager.exit_code == 1
+
+
+def test_manager_writes_run_metadata_and_history(tmp_path):
+    manager = Manager(
+        log_path=None,
+        cache_dir=str(tmp_path / "cache"),
+    )
+
+    manager._start_runtime_run()
+    assert manager.runtime_paths.active_run_path.exists()
+
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        )
+    )
+    manager._finish_runtime_run()
+
+    assert not manager.runtime_paths.active_run_path.exists()
+    assert manager.runtime_paths.final_run_path.exists()
+    assert not manager.runtime_paths.run_dir.exists()
+
+    final_run = json.loads(manager.runtime_paths.final_run_path.read_text())
+    assert final_run["task_counts"] == {
+        "completed": 1,
+        "skipped": 0,
+        "failed": 0,
+    }
+    history = manager.runtime_paths.history_path.read_text().splitlines()
+    assert len(history) == 1
+    history_record = json.loads(history[0])
+    assert history_record["status"] == "completed"
+    assert history_record["filename"] == "ok.bin"
