@@ -11,6 +11,9 @@ if TYPE_CHECKING:
     from .downloader import Downloader
 
 
+STREAM_CHUNK_SIZE = 100 * 1024
+
+
 class Chunk:
     def __init__(
         self,
@@ -78,7 +81,7 @@ class Chunk:
         # 使用滑动窗口计算平均速度，避免单块瞬时速度波动过大
         window_bytes = 0
         window_start = time.time()
-        async for data in response.content.iter_chunked(10240):
+        async for data in response.content.iter_chunked(STREAM_CHUNK_SIZE):
             if self.end is not None:
                 remaining = self.end - self.start + 1 - pos
                 if remaining <= 0:
