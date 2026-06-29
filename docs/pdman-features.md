@@ -184,7 +184,52 @@ pdman --on-download-complete "echo Downloaded {filename} to {filepath}" \
 
 ---
 
-## 6. 内部配置链路
+## 6. 任务状态、结果汇总与退出码
+
+v0.3.3 引入运行时任务结果模型，用于区分任务是完成、按用户策略跳过，还是失败后继续批处理。
+
+| 状态 | 含义 |
+| --- | --- |
+| `completed` | 最终文件已经完成下载，并通过当前启用的后处理或校验 |
+| `skipped` | 仅表示 `--quit-if-exists` 命中已有目标文件，这是用户显式要求的跳过 |
+| `failed` | 任务没有完成下载目标；pdman 会记录原因并继续处理后续任务 |
+
+`failed` 原因包括但不限于：
+
+- HTTP header 阶段返回不可接受状态，例如 403、404、503。
+- 连接超时或连接失败。
+- 分块下载、合并或文件系统处理失败。
+- 启用 `--check-integrity` 后 MD5 不匹配。
+- 重试耗尽后的未处理异常。
+
+运行结束后，`Manager` 会输出 completed / skipped / failed 汇总，并在有 skipped 或 failed 时列出对应任务原因。当前最小退出码规则如下：
+
+| 退出码 | 含义 |
+| --- | --- |
+| `0` | 没有 failed 任务；completed 和 `--quit-if-exists` skipped 都可接受 |
+| `1` | 一个或多个任务 failed |
+| `130` | 用户中断 |
+
+### 6.1 v0.3.3 手动验证说明
+
+本节记录维护者手动执行的 v0.3.3 验证项，用来补充自动化测试。保留这些用例的目的是明确确认 CLI 退出码传递和 MD5 mismatch 失败语义。
+
+推荐手动执行：
+
+```bash
+/usr/bin/git diff --check
+uv run python -m pytest -q tests src/pdman/test.py
+uv run pdman --version
+```
+
+额外关注的测试项：
+
+- CLI 单元测试：确认 `pdman.cli.main()` 返回 `Manager.exit_code`，即存在 failed 时 CLI 返回 `1`。
+- MD5 mismatch 集成测试：使用本地 HTTP server 下载正常 payload，但提供不匹配的 MD5 文件，确认任务结果为 `failed`、原因码为 `integrity_mismatch`、最终 `Manager.exit_code == 1`。
+
+---
+
+## 7. 内部配置链路
 
 当前 CLI 到下载执行的大致链路为：
 

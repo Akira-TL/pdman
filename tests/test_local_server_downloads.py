@@ -284,3 +284,37 @@ def test_yaml_md5_integrity_path_downloads_successfully(tmp_path):
         asyncio.run(manager.download())
 
         assert (download_dir / "checked.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_yaml_md5_integrity_mismatch_records_failed_result(tmp_path):
+    with LocalDownloadServer() as server:
+        download_dir = tmp_path / "downloads"
+        md5_file = tmp_path / "mismatch.md5"
+        md5_file.write_text("1" * 32)
+        tasks_file = tmp_path / "tasks-md5-mismatch.yaml"
+        tasks_file.write_text(
+            "\n".join(
+                [
+                    f"{server.url('/normal.bin')}:",
+                    "  file_name: md5-mismatch.bin",
+                    f"  dir_path: {download_dir}",
+                    f"  md5: {md5_file}",
+                ]
+            )
+        )
+
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            min_split_size="1K",
+            check_integrity=True,
+            log_path=None,
+        )
+        manager.load_input_file(str(tasks_file))
+        asyncio.run(manager.download())
+
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.results[0].reason_code == TaskReason.INTEGRITY_MISMATCH
+        assert manager.exit_code == 1

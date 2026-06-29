@@ -191,7 +191,29 @@ pdman --ca-certificate /path/to/ca.pem "https://example.com/file.bin"
 pdman --check-integrity -i tasks.yaml
 ```
 
-`md5` 可以是 32 位 MD5 字符串、本地文件路径，或返回 MD5 文本的 URL。
+`md5` 可以是 32 位 MD5 字符串、本地文件路径，或返回 MD5 文本的 URL。启用完整性校验后，MD5 不匹配会记录为 `failed`，并使 CLI 返回非零退出码。
+
+### 任务结果与退出码
+
+每次运行结束后，pdman 会汇总任务结果：
+
+```text
+Summary:
+  completed: 1
+  skipped: 1
+  failed: 0
+  downloaded: 128.0 MiB
+```
+
+`skipped` 只表示用户显式启用 `--quit-if-exists` 且目标文件已存在。网络错误、HTTP header 状态异常、连接超时、完整性校验失败等“没有完成下载目标”的情况都会记录为 `failed`；批量任务会继续执行，但最终 CLI 返回 `1`。
+
+当前最小退出码规则：
+
+| 退出码 | 含义 |
+| --- | --- |
+| `0` | 没有 failed 任务 |
+| `1` | 一个或多个任务 failed |
+| `130` | 用户中断 |
 
 ### 下载完成回调
 
