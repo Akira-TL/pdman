@@ -37,6 +37,7 @@ from rich.progress import (
 )
 from .chunk import Chunk
 from .downloader import Downloader
+from .runtime import RuntimePaths
 from .status import TaskResult, TaskStatus
 from .utils import auto_sync
 
@@ -149,6 +150,8 @@ class Manager:
         min_split_size: str = "1M",
         force_sequential: bool = False,
         tmp_dir: str = None,
+        tmp_policy: str = "auto",
+        cache_dir: str = None,
         user_agent: dict | str = None,
         chunk_retry_speed: str | int = None,
         chunk_timeout: int = 10,
@@ -202,6 +205,10 @@ class Manager:
         self.min_split_size = min_split_size
         self.force_sequential = force_sequential
         self.tmp_dir = tmp_dir
+        self.tmp_policy = tmp_policy
+        self.cache_dir = cache_dir
+        self.runtime_paths = RuntimePaths.create(cache_dir=cache_dir)
+        self.run_id = self.runtime_paths.run_id
         self.user_agent = user_agent
         self.check_integrity = check_integrity
         self.chunk_retry_speed = chunk_retry_speed
@@ -266,6 +273,7 @@ class Manager:
             "max_overall_download_limit", "http_auth", "proxy_auth", "headers",
             "connect_timeout", "connect_progress_delay",
             "max_connection_per_server", "summary_interval",
+            "tmp_policy", "tmp_dir", "cache_dir",
         }
         for k, v in kwargs.items():
             if hasattr(self, k) and not k.startswith("_"):
@@ -389,6 +397,10 @@ class Manager:
         # 进度刷新间隔
         if self.summary_interval < 0.1:
             self.summary_interval = 0.1
+        # runtime 目录策略
+        self.tmp_policy = (self.tmp_policy or "auto").lower()
+        if self.tmp_policy not in {"auto", "system", "target"}:
+            raise ValueError(f"Invalid tmp_policy: {self.tmp_policy}")
         # 加载配置文件（如果指定了 conf_path 且尚未加载）
         if self.conf_path is not None:
             self._load_config_file()
@@ -505,6 +517,27 @@ class Manager:
                     url_list = content.splitlines()
                     url_list = [url.strip() for url in url_list if url.strip()]
                     self.add_urls(url_list)
+
+    def resolve_task_tmp_dir(
+        self,
+        *,
+        task_id: str,
+        target_dir: str,
+        file_size: int | None,
+    ) -> str:
+        legacy_tmp = self.runtime_paths.target_tmp_dir(target_dir, task_id)
+        if self.continue_download and self.tmp_dir is None:
+            if (legacy_tmp / ".pdm").exists():
+                return str(legacy_tmp)
+        return str(
+            self.runtime_paths.resolve_task_tmp_dir(
+                task_id=task_id,
+                target_dir=target_dir,
+                tmp_dir=self.tmp_dir,
+                tmp_policy=self.tmp_policy,
+                file_size=file_size,
+            )
+        )
 
     @auto_sync
     async def append(

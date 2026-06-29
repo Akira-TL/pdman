@@ -148,6 +148,18 @@ def main(argv=None):
         help="Temporary directory for chunk files.",
     )
     parser.add_argument(
+        "--tmp-policy",
+        choices=("auto", "system", "target"),
+        default="auto",
+        help="Temporary directory policy. auto uses system tmp by default, target keeps legacy .pdman directories beside the output file.",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=str,
+        default=None,
+        help="Directory for pdman runtime metadata and history. Defaults to ~/.cache/pdman.",
+    )
+    parser.add_argument(
         "-t",
         "--threads",
         type=int,
@@ -295,6 +307,8 @@ def main(argv=None):
         min_split_size=args.min_split_size,
         force_sequential=args.force_sequential,
         tmp_dir=args.tmp,
+        tmp_policy=args.tmp_policy,
+        cache_dir=args.cache_dir,
         check_integrity=args.check_integrity,
         user_agent=args.user_agent,
         chunk_retry_speed=args.chunk_retry_speed,

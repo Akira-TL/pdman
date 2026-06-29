@@ -136,17 +136,19 @@ class Downloader:
                 self.md5 = self.md5.replace("*", self.url)
             self.md5 = await self.process_md5(self.md5)
             # self._logger
-        if self.pdm_tmp is None and self.parent.tmp_dir is not None:
-            self.pdm_tmp = os.path.join(self.parent.tmp_dir, f".pdman.{sha}")
-        elif self.pdm_tmp is None and self.parent.tmp_dir is None:
-            self.pdm_tmp = os.path.join(self.filepath, f".pdman.{sha}")
-        os.makedirs(self.pdm_tmp, exist_ok=True)
         self.header_info = await self._await_connection(
             self.get_headers(), label=self.url
         )
         self.filename = self.filename if self.filename else await self.get_file_name()
         os.makedirs(self.filepath, exist_ok=True)
         self.file_size = self.file_size or await self.get_url_file_size()
+        if self.pdm_tmp is None:
+            self.pdm_tmp = self.parent.resolve_task_tmp_dir(
+                task_id=sha,
+                target_dir=self.filepath,
+                file_size=self.file_size,
+            )
+        os.makedirs(self.pdm_tmp, exist_ok=True)
         self.creat_info()
         self.chunk_root = await self.rebuild_task()
         if self.chunk_root is None:
