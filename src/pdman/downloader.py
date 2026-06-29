@@ -21,10 +21,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .manager import Manager
 from .chunk import Chunk
+from .status import TaskReason, TaskResult, TaskStatus
 
 
 class ConnectionTimeoutSkip(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        reason_code: TaskReason = TaskReason.CONNECTION_TIMEOUT,
+    ):
+        self.reason_code = reason_code
+        super().__init__(message)
 
 
 class HeaderStatusSkip(Exception):
@@ -40,11 +47,24 @@ class HeaderStatusSkip(Exception):
     def can_retry(self) -> bool:
         return self.status in self.RETRYABLE_STATUS_CODES
 
+    def summary(self) -> str:
+        return f"HTTP {self.status} during header check"
+
     def describe(self) -> str:
         reason = f" {self.reason}" if self.reason else ""
         return (
             f"Remote server returned HTTP {self.status}{reason} "
             f"while checking headers for {self.url}"
+        )
+
+
+class IntegrityCheckFailure(Exception):
+    def __init__(self, filename: str, expected: str, actual: str):
+        self.filename = filename
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"MD5 mismatch for {filename}. Expected: {expected}, got: {actual}"
         )
 
 
@@ -73,6 +93,11 @@ class Downloader:
         self.log_path = log_path
         self._downloaded = False
         self._done = False
+        self.status = TaskStatus.PENDING
+        self.status_reason: str | None = None
+        self.status_reason_code: TaskReason | None = None
+        self.status_error: str | None = None
+        self.result: TaskResult | None = None
         self._logger = Logger(
             core=Core(),
             exception=None,
@@ -134,6 +159,47 @@ class Downloader:
             self._per_task_limiter = RateLimiter(self.parent.max_download_limit)
 
 
+    def set_status(
+        self,
+        status: TaskStatus,
+        reason: str | None = None,
+        reason_code: TaskReason | None = None,
+        error: str | None = None,
+    ) -> None:
+        self.status = status
+        if reason is not None:
+            self.status_reason = reason
+        if reason_code is not None:
+            self.status_reason_code = reason_code
+        if error is not None:
+            self.status_error = error
+
+    def _result_bytes(self) -> int:
+        target_path = self.target_path_if_named()
+        if target_path and os.path.exists(target_path):
+            return os.path.getsize(target_path)
+        return self.downloaded_bytes
+
+    def record_result(
+        self,
+        status: TaskStatus,
+        reason: str | None = None,
+        reason_code: TaskReason | None = None,
+        error: str | None = None,
+    ) -> TaskResult:
+        self.set_status(status, reason, reason_code, error)
+        self.result = TaskResult(
+            url=self.url,
+            filename=self.filename,
+            status=status,
+            reason=reason or self.status_reason,
+            reason_code=reason_code or self.status_reason_code,
+            error=error or self.status_error,
+            downloaded_bytes=self._result_bytes(),
+            total_bytes=self.file_size if self.file_size > 0 else None,
+        )
+        return self.result
+
     def refresh_downloaded_bytes(self) -> int:
         self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
         return self.downloaded_bytes
@@ -149,6 +215,7 @@ class Downloader:
         return headers
 
     async def _await_connection(self, awaitable, label: str):
+        self.set_status(TaskStatus.CONNECTING)
         timeout = float(self.parent.connect_timeout or 30)
         delay = min(float(self.parent.connect_progress_delay or 0), timeout)
         started_at = time.monotonic()
@@ -184,7 +251,10 @@ class Downloader:
                 f"Connection to {label} timed out after {int(timeout)}s"
             ) from e
         except aiohttp.ClientConnectionError as e:
-            raise ConnectionTimeoutSkip(f"Connection to {label} failed") from e
+            raise ConnectionTimeoutSkip(
+                f"Connection to {label} failed",
+                TaskReason.CONNECTION_FAILED,
+            ) from e
         finally:
             if progress_task is not None:
                 self.parent._progress.remove_task(progress_task)
@@ -295,6 +365,7 @@ class Downloader:
             return fname
 
     async def get_headers(self) -> dict:
+        self.set_status(TaskStatus.HEADER_CHECKING)
         async with self._build_client_session() as session:
             headers_to_send = self.build_request_headers()
             async with session.head(
@@ -488,6 +559,7 @@ class Downloader:
             self._logger.error("Unknown error in creating .pdm file.")
 
     async def merge_chunks(self):
+        self.set_status(TaskStatus.MERGING)
         if os.path.exists(os.path.join(self.filepath, self.filename)):
             suffixs = self.filename.split(".")
             if len(suffixs) > 2 and suffixs[-2] == "tar":
@@ -550,18 +622,33 @@ class Downloader:
         if not target_path or not os.path.exists(target_path):
             return False
         if self.parent.quit_if_exists:
+            reason = "target already exists"
             self.parent._logger.info(
-                f"File {self.filename} already exists, skipping."
+                f"File {self.filename} already exists, skipping because "
+                "--quit-if-exists is enabled."
             )
             self._done = True
+            self.record_result(
+                TaskStatus.SKIPPED,
+                reason=reason,
+                reason_code=TaskReason.TARGET_EXISTS,
+            )
             return True
         if not self.parent.auto_file_renaming:
+            reason = "target already exists and auto-renaming is disabled"
+            self.parent._logger.error(f"Failed {self.filename}: {reason}.")
             await self.parent.pop(self.url)
+            self.record_result(
+                TaskStatus.FAILED,
+                reason=reason,
+                reason_code=TaskReason.TARGET_EXISTS,
+            )
             return True
         return False
 
     async def check_integrity(self):
         if self.parent.check_integrity:
+            self.set_status(TaskStatus.VERIFYING)
             if self.md5 is None:
                 self.parent._logger.info(
                     f"{self.filename} No md5 provided, skipping integrity check."
@@ -583,9 +670,11 @@ class Downloader:
                 return True
             else:
                 self.parent._logger.error(
-                    f"{self.filename}MD5 checksum does not match! Expected: {self.md5}, Got: {file_md5}"
+                    f"{self.filename} MD5 checksum does not match! "
+                    f"Expected: {self.md5}, Got: {file_md5}"
                 )
-                return False
+                raise IntegrityCheckFailure(self.filename, self.md5, file_md5)
+        return True
 
     async def start_download(self, _iter=None):
         if _iter is None:
@@ -594,20 +683,31 @@ class Downloader:
         while _iter >= 0:
             try:
                 if await self.skip_existing_named_target():
-                    return self.url
+                    return self.result
                 if not parsed:
                     await self.parse_config()
                     parsed = True
                 if await self.skip_existing_named_target():
-                    return self.url
+                    return self.result
                 self.task = None
+                self.set_status(TaskStatus.DOWNLOADING)
                 await self._start_download()
                 await self.merge_chunks()
                 await self.check_integrity()
                 self._done = True
+                self.record_result(
+                    TaskStatus.COMPLETED,
+                    reason="download completed",
+                )
                 break
             except HeaderStatusSkip as e:
                 if e.can_retry and _iter > 0:
+                    self.set_status(
+                        TaskStatus.RETRYING,
+                        reason=e.summary(),
+                        reason_code=TaskReason.HTTP_STATUS,
+                        error=str(e),
+                    )
                     self._logger.warning(
                         f"{e}. Retrying in {self.parent.retry_wait}s "
                         f"({_iter} retries left)."
@@ -615,29 +715,76 @@ class Downloader:
                     _iter -= 1
                     await asyncio.sleep(self.parent.retry_wait)
                     continue
-                self._logger.warning(f"{e}. Skipping this URL.")
+                reason = e.summary()
+                self._logger.error(f"Failed {self.filename or self.url}: {reason}.")
                 if self.pdm_tmp:
                     await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
                 self._done = False
-                return self.url
+                return self.record_result(
+                    TaskStatus.FAILED,
+                    reason=reason,
+                    reason_code=TaskReason.HTTP_STATUS,
+                    error=str(e),
+                )
             except ConnectionTimeoutSkip as e:
-                self._logger.warning(f"{e}. Skipping this URL.")
+                reason = str(e)
+                self._logger.error(f"Failed {self.filename or self.url}: {reason}.")
                 if self.pdm_tmp:
                     await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
                 self._done = False
-                return self.url
+                return self.record_result(
+                    TaskStatus.FAILED,
+                    reason=reason,
+                    reason_code=e.reason_code,
+                    error=str(e),
+                )
+            except IntegrityCheckFailure as e:
+                reason = "MD5 mismatch"
+                self._logger.error(f"Failed {self.filename or self.url}: {e}.")
+                self._done = False
+                return self.record_result(
+                    TaskStatus.FAILED,
+                    reason=reason,
+                    reason_code=TaskReason.INTEGRITY_MISMATCH,
+                    error=str(e),
+                )
             except Exception as e:
                 self._logger.debug(traceback.format_exc())
                 if _iter > 0:
+                    reason_code = (
+                        TaskReason.MERGE_FAILED
+                        if self.status == TaskStatus.MERGING
+                        else TaskReason.UNEXPECTED_ERROR
+                    )
+                    self.set_status(
+                        TaskStatus.RETRYING,
+                        reason=str(e),
+                        reason_code=reason_code,
+                        error=str(e),
+                    )
                     _iter -= 1
                     await asyncio.sleep(self.parent.retry_wait)
                 else:
-                    self._logger.error(
-                        f"Failed to download {self.filename} from {self.url}"
+                    reason_code = (
+                        TaskReason.MERGE_FAILED
+                        if self.status == TaskStatus.MERGING
+                        else TaskReason.UNEXPECTED_ERROR
                     )
-                    raise Exception(
-                        f"Failed to download {self.url} after retries."
-                    ) from e
+                    reason = (
+                        "merge failed"
+                        if reason_code == TaskReason.MERGE_FAILED
+                        else "failed after retries"
+                    )
+                    self._logger.error(
+                        f"Failed {self.filename or self.url}: {reason}. {e}"
+                    )
+                    self._done = False
+                    return self.record_result(
+                        TaskStatus.FAILED,
+                        reason=reason,
+                        reason_code=reason_code,
+                        error=str(e),
+                    )
         if self._done:
             # 下载完成回调
             if self.parent.on_download_complete:
@@ -645,7 +792,12 @@ class Downloader:
             self.parent._logger.success(
                 f"Finished download {self.filename} from {self.url}"
             )
-            return self.url
+            return self.result
+        return self.result or self.record_result(
+            TaskStatus.FAILED,
+            reason="download did not complete",
+            reason_code=TaskReason.UNEXPECTED_ERROR,
+        )
 
     def _run_download_complete_callback(self):
         """异步执行下载完成回调命令（不阻塞后续任务）"""

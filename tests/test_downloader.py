@@ -3,6 +3,7 @@ import asyncio
 from pdman.chunk import Chunk
 from pdman.downloader import Downloader
 from pdman.manager import Manager
+from pdman.status import TaskReason, TaskStatus
 
 
 def test_refresh_downloaded_bytes_uses_existing_chunk_sizes(tmp_path):
@@ -39,7 +40,9 @@ def test_quit_if_exists_skips_named_file_before_parse_config(tmp_path):
 
         result = await downloader.start_download()
 
-        assert result == downloader.url
+        assert result.url == downloader.url
+        assert result.status == TaskStatus.SKIPPED
+        assert result.reason_code == TaskReason.TARGET_EXISTS
         assert existing_file.read_bytes() == b"existing"
         assert downloader._done is True
 
