@@ -343,9 +343,11 @@ def main(argv=None):
                 pdman.load_input_file(file)
     try:
         asyncio.run(pdman.download())
+        return pdman.exit_code
     except KeyboardInterrupt:
         print("\033[31mDownload interrupted by user.")
+        return 130
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

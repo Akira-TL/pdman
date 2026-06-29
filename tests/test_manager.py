@@ -3,6 +3,7 @@ import types
 
 from pdman.downloader import Downloader
 from pdman.manager import Manager
+from pdman.status import TaskReason, TaskResult, TaskStatus
 
 
 def test_max_downloads_limits_url_task_concurrency(tmp_path):
@@ -15,11 +16,15 @@ def test_max_downloads_limits_url_task_concurrency(tmp_path):
             state["max_seen"] = max(state["max_seen"], state["active"])
             await asyncio.sleep(0.02)
             state["active"] -= 1
-            return self.url
+            return self.record_result(
+                TaskStatus.COMPLETED,
+                reason="download completed",
+            )
 
         for index in range(3):
             url = f"https://example.com/file-{index}.bin"
             downloader = Downloader(manager, url, str(tmp_path))
+            downloader.filename = f"file-{index}.bin"
             downloader.start_download = types.MethodType(fake_start_download, downloader)
             manager._urls[url] = downloader
 
@@ -29,3 +34,45 @@ def test_max_downloads_limits_url_task_concurrency(tmp_path):
         assert manager._downloaders == []
 
     asyncio.run(run_case())
+
+
+def test_manager_summary_counts_task_results():
+    manager = Manager(log_path=None)
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        )
+    )
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/existing.bin",
+            filename="existing.bin",
+            status=TaskStatus.SKIPPED,
+            reason="target already exists",
+            reason_code=TaskReason.TARGET_EXISTS,
+        )
+    )
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/status.bin",
+            filename="status.bin",
+            status=TaskStatus.FAILED,
+            reason="HTTP 503 during header check",
+            reason_code=TaskReason.HTTP_STATUS,
+        )
+    )
+
+    summary = manager.summarize_results()
+
+    assert "completed: 1" in summary
+    assert "skipped: 1" in summary
+    assert "failed: 1" in summary
+    assert "downloaded: 1.0 KiB" in summary
+    assert "existing.bin - target already exists" in summary
+    assert "status.bin - HTTP 503 during header check" in summary
+    assert manager.exit_code == 1

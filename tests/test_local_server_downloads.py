@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from pdman.manager import Manager
+from pdman.status import TaskReason, TaskStatus
 
 PAYLOAD = (b"pdman-local-test-" * 8192) + b"end"
 UNKNOWN_SIZE_PAYLOAD = b"unknown-size-body" * 1024
@@ -168,7 +169,7 @@ def test_slow_head_succeeds_after_progress_delay(tmp_path):
         assert (tmp_path / "slow.bin").read_bytes() == PAYLOAD
 
 
-def test_slow_head_is_skipped_after_connection_timeout(tmp_path):
+def test_slow_head_is_failed_after_connection_timeout(tmp_path):
     with LocalDownloadServer() as server:
         manager = Manager(
             max_downloads=1,
@@ -188,6 +189,9 @@ def test_slow_head_is_skipped_after_connection_timeout(tmp_path):
 
         assert not (tmp_path / "timeout.bin").exists()
         assert not list(tmp_path.glob(".pdman.*"))
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.results[0].reason_code == TaskReason.CONNECTION_TIMEOUT
+        assert manager.exit_code == 1
 
 
 def test_unreachable_local_port_is_skipped(tmp_path):
@@ -208,9 +212,12 @@ def test_unreachable_local_port_is_skipped(tmp_path):
 
     assert not (tmp_path / "missing.bin").exists()
     assert not list(tmp_path.glob(".pdman.*"))
+    assert manager.results[0].status == TaskStatus.FAILED
+    assert manager.results[0].reason_code == TaskReason.CONNECTION_FAILED
+    assert manager.exit_code == 1
 
 
-def test_header_http_status_is_skipped_without_raising(tmp_path):
+def test_header_http_status_is_failed_without_raising(tmp_path):
     with LocalDownloadServer() as server:
         manager = Manager(
             max_downloads=1,
@@ -227,6 +234,9 @@ def test_header_http_status_is_skipped_without_raising(tmp_path):
 
         assert not (tmp_path / "unavailable.bin").exists()
         assert not list(tmp_path.glob(".pdman.*"))
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.results[0].reason_code == TaskReason.HTTP_STATUS
+        assert manager.exit_code == 1
 
 
 def test_unknown_content_length_downloads_successfully(tmp_path):

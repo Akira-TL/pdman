@@ -37,6 +37,7 @@ from rich.progress import (
 )
 from .chunk import Chunk
 from .downloader import Downloader
+from .status import TaskResult, TaskStatus
 from .utils import auto_sync
 
 
@@ -250,6 +251,8 @@ class Manager:
         )
         self._downloader_main = None
         self._downloaders = []
+        self.results: list[TaskResult] = []
+        self.exit_code = 0
         # 先设置 summary_interval 再调用 _parse_config（这样 _parse_config 可以用）
         self._parse_config()
 
@@ -545,6 +548,56 @@ class Manager:
         self._logger.debug(f"Popped URL item: {url}")
         return url, download_entity
 
+    @staticmethod
+    def _format_bytes(size: int) -> str:
+        units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        value = float(size)
+        for unit in units:
+            if value < 1024 or unit == units[-1]:
+                if unit == "B":
+                    return f"{int(value)} {unit}"
+                return f"{value:.1f} {unit}"
+            value /= 1024
+        return f"{size} B"
+
+    def record_task_result(self, result) -> None:
+        if isinstance(result, TaskResult):
+            self.results.append(result)
+            if result.status == TaskStatus.FAILED:
+                self.exit_code = 1
+
+    def summarize_results(self) -> str:
+        completed = [
+            r for r in self.results if r.status == TaskStatus.COMPLETED
+        ]
+        skipped = [r for r in self.results if r.status == TaskStatus.SKIPPED]
+        failed = [r for r in self.results if r.status == TaskStatus.FAILED]
+        downloaded = sum(r.downloaded_bytes for r in completed)
+        lines = [
+            "Summary:",
+            f"  completed: {len(completed)}",
+            f"  skipped: {len(skipped)}",
+            f"  failed: {len(failed)}",
+            f"  downloaded: {self._format_bytes(downloaded)}",
+        ]
+        if skipped:
+            lines.append("Skipped:")
+            for result in skipped:
+                name = result.filename or result.url
+                reason = result.reason or result.error or "unknown reason"
+                lines.append(f"  {name} - {reason}")
+        if failed:
+            lines.append("Failed:")
+            for result in failed:
+                name = result.filename or result.url
+                reason = result.reason or result.error or "unknown reason"
+                lines.append(f"  {name} - {reason}")
+        return "\n".join(lines)
+
+    def print_summary(self) -> None:
+        if self.results:
+            self._console.print(self.summarize_results())
+
     async def wait(self) -> None:
         while self._downloaders:
             await self.wait_one()
@@ -560,10 +613,12 @@ class Manager:
             return
         for d in done:
             try:
-                _url = d.result()
+                result = d.result()
+                self.record_task_result(result)
             except asyncio.CancelledError:
                 pass
             except Exception as e:
+                self.exit_code = 1
                 self._logger.error(f"task error: {e}")
                 self._logger.error(traceback.format_exc())
         self._downloaders = list(pending)
@@ -578,6 +633,7 @@ class Manager:
             await self._downloader_main
         finally:
             self._downloader_main = None
+        self.print_summary()
 
     async def _download_once(self, downloading=None) -> None:
         if downloading is None:
