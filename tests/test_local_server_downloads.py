@@ -45,6 +45,10 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         if parsed.path == "/unknown.bin":
             self._send_unknown_size(send_body)
             return
+        if parsed.path == "/status.bin":
+            status = int(parse_qs(parsed.query).get("status", ["503"])[0])
+            self._send_text(status, f"HTTP {status}".encode())
+            return
         self._send_text(404, b"not found")
 
     def _send_text(self, status: int, body: bytes):
@@ -204,6 +208,25 @@ def test_unreachable_local_port_is_skipped(tmp_path):
 
     assert not (tmp_path / "missing.bin").exists()
     assert not list(tmp_path.glob(".pdman.*"))
+
+
+def test_header_http_status_is_skipped_without_raising(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/status.bin?status=503"),
+            file_name="unavailable.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "unavailable.bin").exists()
+        assert not list(tmp_path.glob(".pdman.*"))
 
 
 def test_unknown_content_length_downloads_successfully(tmp_path):

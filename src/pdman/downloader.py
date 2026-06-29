@@ -27,6 +27,27 @@ class ConnectionTimeoutSkip(Exception):
     pass
 
 
+class HeaderStatusSkip(Exception):
+    RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+
+    def __init__(self, url: str, status: int, reason: str | None = None):
+        self.url = url
+        self.status = status
+        self.reason = reason or ""
+        super().__init__(self.describe())
+
+    @property
+    def can_retry(self) -> bool:
+        return self.status in self.RETRYABLE_STATUS_CODES
+
+    def describe(self) -> str:
+        reason = f" {self.reason}" if self.reason else ""
+        return (
+            f"Remote server returned HTTP {self.status}{reason} "
+            f"while checking headers for {self.url}"
+        )
+
+
 class Downloader:
     def __init__(
         self,
@@ -284,10 +305,11 @@ class Downloader:
             ) as response:
                 if response.status in (200, 206):
                     return response.headers
-                else:
-                    raise Exception(
-                        f"Failed to get header info, status code: {response.status},headers:{response.headers}"
-                    )
+                raise HeaderStatusSkip(
+                    self.url,
+                    response.status,
+                    getattr(response, "reason", None),
+                )
 
     async def get_url_file_size(self) -> int:
         file_size = None
@@ -584,8 +606,22 @@ class Downloader:
                 await self.check_integrity()
                 self._done = True
                 break
+            except HeaderStatusSkip as e:
+                if e.can_retry and _iter > 0:
+                    self._logger.warning(
+                        f"{e}. Retrying in {self.parent.retry_wait}s "
+                        f"({_iter} retries left)."
+                    )
+                    _iter -= 1
+                    await asyncio.sleep(self.parent.retry_wait)
+                    continue
+                self._logger.warning(f"{e}. Skipping this URL.")
+                if self.pdm_tmp:
+                    await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
+                self._done = False
+                return self.url
             except ConnectionTimeoutSkip as e:
-                self._logger.warning(f"{e}, skipping.")
+                self._logger.warning(f"{e}. Skipping this URL.")
                 if self.pdm_tmp:
                     await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
                 self._done = False
