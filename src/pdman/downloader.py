@@ -40,6 +40,7 @@ class Downloader:
         self.pdm_tmp = pdm_tmp
         self.file_size: int = 0
         self.chunk_root: Chunk | None = None
+        self.downloaded_bytes: int = 0
         self.lock = asyncio.Lock()
         self.header_info = None
         self.log_path = log_path
@@ -96,12 +97,17 @@ class Downloader:
         self.chunk_root = await self.rebuild_task()
         if self.chunk_root is None:
             self.chunk_root = await self.build_task()
+        self.refresh_downloaded_bytes()
         # 单任务限速器（在 Manager 全局限速之外）
         self._per_task_limiter = None
         if self.parent.max_download_limit:
             from .manager import RateLimiter
             self._per_task_limiter = RateLimiter(self.parent.max_download_limit)
 
+
+    def refresh_downloaded_bytes(self) -> int:
+        self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
+        return self.downloaded_bytes
 
     def _build_client_session(self, **overrides) -> aiohttp.ClientSession:
         """构建统一配置的 aiohttp.ClientSession，用于所有 HTTP 请求"""
@@ -576,14 +582,19 @@ class Downloader:
                     f"Downloading {self.filename}", total=None, dl=len(tasks)
                 )
                 while not self._downloaded:
+                    self.parent._progress.update(
+                        self.task, completed=self.downloaded_bytes, dl=len(tasks)
+                    )
                     await asyncio.sleep(self.parent.summary_interval)
             else:
                 self.task = self.parent._progress.add_task(
-                    f"Downloading {self.filename}", total=self.file_size, dl=len(tasks)
+                    f"Downloading {self.filename}",
+                    total=self.file_size,
+                    completed=self.downloaded_bytes,
+                    dl=len(tasks),
                 )
                 while self.file_size > 0:
-                    async with self.lock:
-                        completed = sum(self.chunk_root)
+                    completed = min(self.downloaded_bytes, self.file_size)
                     if self.file_size <= completed:
                         break
                     self.parent._progress.update(
@@ -591,7 +602,9 @@ class Downloader:
                     )
                     await asyncio.sleep(self.parent.summary_interval)
                 self.parent._progress.update(
-                    self.task, completed=completed, dl=len(tasks)
+                    self.task,
+                    completed=min(self.downloaded_bytes, self.file_size),
+                    dl=len(tasks),
                 )
                 self.parent._logger.info(f"Completed downloading {self.filename}")
             # self.parent._progress.stop_task(self.task)

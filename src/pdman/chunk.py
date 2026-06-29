@@ -90,6 +90,7 @@ class Chunk:
             await f.write(data)
             async with self.parent.lock:
                 self.size += len(data)
+                self.parent.downloaded_bytes += len(data)
                 now = time.time()
                 window_bytes += len(data)
                 window_elaps = max(now - window_start, 1e-6)
