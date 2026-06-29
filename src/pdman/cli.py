@@ -211,8 +211,14 @@ def main(argv=None):
     parser.add_argument(
         "--connect-timeout",
         type=int,
-        default=None,
-        help="Connection timeout in seconds.",
+        default=30,
+        help="Connection timeout in seconds before skipping the URL.",
+    )
+    parser.add_argument(
+        "--connect-progress-delay",
+        type=float,
+        default=5.0,
+        help="Seconds to wait before showing an indeterminate connection progress indicator.",
     )
     parser.add_argument(
         "--max-connection-per-server",
@@ -310,6 +316,7 @@ def main(argv=None):
         # 请求头与超时
         headers=args.header if args.header else None,
         connect_timeout=args.connect_timeout,
+        connect_progress_delay=args.connect_progress_delay,
         max_connection_per_server=args.max_connection_per_server,
         referer=args.referer,
         # 回调

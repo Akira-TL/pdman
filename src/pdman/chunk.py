@@ -11,6 +11,9 @@ if TYPE_CHECKING:
     from .downloader import Downloader
 
 
+STREAM_CHUNK_SIZE = 100 * 1024
+
+
 class Chunk:
     def __init__(
         self,
@@ -78,7 +81,7 @@ class Chunk:
         # 使用滑动窗口计算平均速度，避免单块瞬时速度波动过大
         window_bytes = 0
         window_start = time.time()
-        async for data in response.content.iter_chunked(10240):
+        async for data in response.content.iter_chunked(STREAM_CHUNK_SIZE):
             if self.end is not None:
                 remaining = self.end - self.start + 1 - pos
                 if remaining <= 0:
@@ -87,6 +90,7 @@ class Chunk:
             await f.write(data)
             async with self.parent.lock:
                 self.size += len(data)
+                self.parent.downloaded_bytes += len(data)
                 now = time.time()
                 window_bytes += len(data)
                 window_elaps = max(now - window_start, 1e-6)
@@ -152,13 +156,7 @@ class Chunk:
             for _ in range(self.parent.parent.retry):
                 if os.path.exists(self.chunk_path) and self._is_complete():
                     return self
-                headers = {}  # 每次重试迭代使用干净的 headers 字典
-                # 合并全局自定义 HTTP 头
-                if self.parent.parent.headers_dict:
-                    headers.update(self.parent.parent.headers_dict)
-                # 设置 Referer
-                if self.parent.parent.referer:
-                    headers.setdefault("Referer", self.parent.parent.referer)
+                headers = self.parent.build_request_headers()
                 while True:
                     try:
                         self._apply_range_header(headers)

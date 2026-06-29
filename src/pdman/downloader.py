@@ -2,6 +2,7 @@ import re
 import os
 import json
 import time
+import math
 import shutil
 import asyncio
 import hashlib
@@ -14,11 +15,37 @@ from rich.text import Text
 from urllib.parse import unquote
 from loguru._logger import Logger, Core
 
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .manager import Manager
 from .chunk import Chunk
+
+
+class ConnectionTimeoutSkip(Exception):
+    pass
+
+
+class HeaderStatusSkip(Exception):
+    RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+
+    def __init__(self, url: str, status: int, reason: str | None = None):
+        self.url = url
+        self.status = status
+        self.reason = reason or ""
+        super().__init__(self.describe())
+
+    @property
+    def can_retry(self) -> bool:
+        return self.status in self.RETRYABLE_STATUS_CODES
+
+    def describe(self) -> str:
+        reason = f" {self.reason}" if self.reason else ""
+        return (
+            f"Remote server returned HTTP {self.status}{reason} "
+            f"while checking headers for {self.url}"
+        )
 
 
 class Downloader:
@@ -40,6 +67,7 @@ class Downloader:
         self.pdm_tmp = pdm_tmp
         self.file_size: int = 0
         self.chunk_root: Chunk | None = None
+        self.downloaded_bytes: int = 0
         self.lock = asyncio.Lock()
         self.header_info = None
         self.log_path = log_path
@@ -88,7 +116,9 @@ class Downloader:
         elif self.pdm_tmp is None and self.parent.tmp_dir is None:
             self.pdm_tmp = os.path.join(self.filepath, f".pdman.{sha}")
         os.makedirs(self.pdm_tmp, exist_ok=True)
-        self.header_info = await self.get_headers()
+        self.header_info = await self._await_connection(
+            self.get_headers(), label=self.url
+        )
         self.filename = self.filename if self.filename else await self.get_file_name()
         os.makedirs(self.filepath, exist_ok=True)
         self.file_size = self.file_size or await self.get_url_file_size()
@@ -96,12 +126,68 @@ class Downloader:
         self.chunk_root = await self.rebuild_task()
         if self.chunk_root is None:
             self.chunk_root = await self.build_task()
+        self.refresh_downloaded_bytes()
         # 单任务限速器（在 Manager 全局限速之外）
         self._per_task_limiter = None
         if self.parent.max_download_limit:
             from .manager import RateLimiter
             self._per_task_limiter = RateLimiter(self.parent.max_download_limit)
 
+
+    def refresh_downloaded_bytes(self) -> int:
+        self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
+        return self.downloaded_bytes
+
+    def build_request_headers(self) -> dict[str, str]:
+        headers = {"Accept-Encoding": "identity"}
+        if isinstance(self.parent.user_agent, dict):
+            headers.update(self.parent.user_agent)
+        if self.parent.headers_dict:
+            headers.update(self.parent.headers_dict)
+        if self.parent.referer:
+            headers.setdefault("Referer", self.parent.referer)
+        return headers
+
+    async def _await_connection(self, awaitable, label: str):
+        timeout = float(self.parent.connect_timeout or 30)
+        delay = min(float(self.parent.connect_progress_delay or 0), timeout)
+        started_at = time.monotonic()
+        task = asyncio.create_task(awaitable)
+        progress_task = None
+        try:
+            done, _ = await asyncio.wait({task}, timeout=delay)
+            if done:
+                return await task
+            while not task.done():
+                elapsed = time.monotonic() - started_at
+                remaining = max(0, math.ceil(timeout - elapsed))
+                if remaining <= 0:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+                    raise ConnectionTimeoutSkip(
+                        f"Connection to {label} timed out after {int(timeout)}s"
+                    )
+                description = f"Connecting {label} ({remaining}s left)"
+                if progress_task is None:
+                    progress_task = self.parent._progress.add_task(
+                        description, total=None, dl="wait"
+                    )
+                else:
+                    self.parent._progress.update(
+                        progress_task, description=description, dl="wait"
+                    )
+                await asyncio.sleep(min(self.parent.summary_interval, 1.0, remaining))
+            return await task
+        except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as e:
+            raise ConnectionTimeoutSkip(
+                f"Connection to {label} timed out after {int(timeout)}s"
+            ) from e
+        except aiohttp.ClientConnectionError as e:
+            raise ConnectionTimeoutSkip(f"Connection to {label} failed") from e
+        finally:
+            if progress_task is not None:
+                self.parent._progress.remove_task(progress_task)
 
     def _build_client_session(self, **overrides) -> aiohttp.ClientSession:
         """构建统一配置的 aiohttp.ClientSession，用于所有 HTTP 请求"""
@@ -210,10 +296,7 @@ class Downloader:
 
     async def get_headers(self) -> dict:
         async with self._build_client_session() as session:
-            headers_to_send = {"Accept-Encoding": "identity"}
-            # 合并全局自定义 HTTP 头
-            if self.parent.headers_dict:
-                headers_to_send.update(self.parent.headers_dict)
+            headers_to_send = self.build_request_headers()
             async with session.head(
                 self.url,
                 allow_redirects=True,
@@ -222,10 +305,11 @@ class Downloader:
             ) as response:
                 if response.status in (200, 206):
                     return response.headers
-                else:
-                    raise Exception(
-                        f"Failed to get header info, status code: {response.status},headers:{response.headers}"
-                    )
+                raise HeaderStatusSkip(
+                    self.url,
+                    response.status,
+                    getattr(response, "reason", None),
+                )
 
     async def get_url_file_size(self) -> int:
         file_size = None
@@ -456,6 +540,26 @@ class Downloader:
         await asyncio.to_thread(os.replace, temp_path, dest_path)
         await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
 
+    def target_path_if_named(self) -> str | None:
+        if not self.filename:
+            return None
+        return os.path.join(self.filepath, self.filename)
+
+    async def skip_existing_named_target(self) -> bool:
+        target_path = self.target_path_if_named()
+        if not target_path or not os.path.exists(target_path):
+            return False
+        if self.parent.quit_if_exists:
+            self.parent._logger.info(
+                f"File {self.filename} already exists, skipping."
+            )
+            self._done = True
+            return True
+        if not self.parent.auto_file_renaming:
+            await self.parent.pop(self.url)
+            return True
+        return False
+
     async def check_integrity(self):
         if self.parent.check_integrity:
             if self.md5 is None:
@@ -489,24 +593,12 @@ class Downloader:
         parsed = False
         while _iter >= 0:
             try:
+                if await self.skip_existing_named_target():
+                    return self.url
                 if not parsed:
                     await self.parse_config()
                     parsed = True
-                # quit 模式：目标文件已存在则跳过
-                if self.parent.quit_if_exists and os.path.exists(
-                    os.path.join(self.filepath, self.filename)
-                ):
-                    self._logger.info(
-                        f"File {self.filename} already exists, skipping."
-                    )
-                    self._done = True
-                    return self.url
-                if (
-                    self.filename is not None
-                    and os.path.exists(os.path.join(self.filepath, self.filename))
-                    and not self.parent.auto_file_renaming
-                ):
-                    await self.parent.pop(self.url)
+                if await self.skip_existing_named_target():
                     return self.url
                 self.task = None
                 await self._start_download()
@@ -514,6 +606,26 @@ class Downloader:
                 await self.check_integrity()
                 self._done = True
                 break
+            except HeaderStatusSkip as e:
+                if e.can_retry and _iter > 0:
+                    self._logger.warning(
+                        f"{e}. Retrying in {self.parent.retry_wait}s "
+                        f"({_iter} retries left)."
+                    )
+                    _iter -= 1
+                    await asyncio.sleep(self.parent.retry_wait)
+                    continue
+                self._logger.warning(f"{e}. Skipping this URL.")
+                if self.pdm_tmp:
+                    await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
+                self._done = False
+                return self.url
+            except ConnectionTimeoutSkip as e:
+                self._logger.warning(f"{e}. Skipping this URL.")
+                if self.pdm_tmp:
+                    await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
+                self._done = False
+                return self.url
             except Exception as e:
                 self._logger.debug(traceback.format_exc())
                 if _iter > 0:
@@ -576,14 +688,19 @@ class Downloader:
                     f"Downloading {self.filename}", total=None, dl=len(tasks)
                 )
                 while not self._downloaded:
+                    self.parent._progress.update(
+                        self.task, completed=self.downloaded_bytes, dl=len(tasks)
+                    )
                     await asyncio.sleep(self.parent.summary_interval)
             else:
                 self.task = self.parent._progress.add_task(
-                    f"Downloading {self.filename}", total=self.file_size, dl=len(tasks)
+                    f"Downloading {self.filename}",
+                    total=self.file_size,
+                    completed=self.downloaded_bytes,
+                    dl=len(tasks),
                 )
                 while self.file_size > 0:
-                    async with self.lock:
-                        completed = sum(self.chunk_root)
+                    completed = min(self.downloaded_bytes, self.file_size)
                     if self.file_size <= completed:
                         break
                     self.parent._progress.update(
@@ -591,7 +708,9 @@ class Downloader:
                     )
                     await asyncio.sleep(self.parent.summary_interval)
                 self.parent._progress.update(
-                    self.task, completed=completed, dl=len(tasks)
+                    self.task,
+                    completed=min(self.downloaded_bytes, self.file_size),
+                    dl=len(tasks),
                 )
                 self.parent._logger.info(f"Completed downloading {self.filename}")
             # self.parent._progress.stop_task(self.task)

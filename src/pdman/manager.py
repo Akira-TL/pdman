@@ -108,6 +108,7 @@ class Manager:
         # 请求头与超时
         headers: 自定义 HTTP 头列表，每个元素为 "Key: Value"
         connect_timeout: 连接超时（秒），独立于读写超时
+        connect_progress_delay: 连接等待提示延迟（秒），超过该时间仍未连通则显示等待进度
         max_connection_per_server: 单服务器最大连接数，0 表示不限制
         referer: HTTP Referer 头
         # 回调
@@ -163,7 +164,8 @@ class Manager:
         proxy_auth: str = None,
         # === 请求头与超时 ===
         headers: list[str] = None,
-        connect_timeout: int = None,
+        connect_timeout: int = 30,
+        connect_progress_delay: float = 5.0,
         max_connection_per_server: int = 0,
         referer: str = None,
         # === 回调 ===
@@ -218,6 +220,7 @@ class Manager:
         # === 请求头与超时 ===
         self.headers = headers
         self.connect_timeout = connect_timeout
+        self.connect_progress_delay = connect_progress_delay
         self.max_connection_per_server = max_connection_per_server
         self.referer = referer
         # === 回调 ===
@@ -258,6 +261,7 @@ class Manager:
             "max_downloads", "max_concurrent_downloads", "min_split_size",
             "chunk_retry_speed", "force_sequential", "max_download_limit",
             "max_overall_download_limit", "http_auth", "proxy_auth", "headers",
+            "connect_timeout", "connect_progress_delay",
             "max_connection_per_server", "summary_interval",
         }
         for k, v in kwargs.items():
@@ -366,6 +370,13 @@ class Manager:
                         )
             elif isinstance(self.headers, dict):
                 self.headers_dict = dict(self.headers)
+        if self.connect_timeout is None or self.connect_timeout <= 0:
+            self.connect_timeout = 30
+        self.connect_progress_delay = float(self.connect_progress_delay)
+        if self.connect_progress_delay < 0:
+            self.connect_progress_delay = 0
+        if self.connect_progress_delay >= self.connect_timeout:
+            self.connect_progress_delay = max(self.connect_timeout - 0.1, 0)
         # 连接数上限校验
         if self.max_connection_per_server < 0:
             self.max_connection_per_server = 0
@@ -578,15 +589,11 @@ class Manager:
                     continue
                 downloading[url] = True
                 assert isinstance(download_entity, Downloader)
-                if len(self._downloaders) <= self.max_downloads:
-                    self._downloaders.append(
-                        asyncio.create_task(download_entity.start_download())
-                    )
-                else:
+                while len(self._downloaders) >= self.max_downloads:
                     await self.wait_one()
-                    self._downloaders.append(
-                        asyncio.create_task(download_entity.start_download())
-                    )
+                self._downloaders.append(
+                    asyncio.create_task(download_entity.start_download())
+                )
                 self._logger.debug(f"Starting download for {url}")
             await self.wait()
             await asyncio.sleep(0.1)
