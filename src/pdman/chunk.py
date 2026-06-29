@@ -156,13 +156,7 @@ class Chunk:
             for _ in range(self.parent.parent.retry):
                 if os.path.exists(self.chunk_path) and self._is_complete():
                     return self
-                headers = {}  # 每次重试迭代使用干净的 headers 字典
-                # 合并全局自定义 HTTP 头
-                if self.parent.parent.headers_dict:
-                    headers.update(self.parent.parent.headers_dict)
-                # 设置 Referer
-                if self.parent.parent.referer:
-                    headers.setdefault("Referer", self.parent.parent.referer)
+                headers = self.parent.build_request_headers()
                 while True:
                     try:
                         self._apply_range_header(headers)

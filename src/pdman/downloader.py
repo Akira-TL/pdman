@@ -117,6 +117,16 @@ class Downloader:
         self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
         return self.downloaded_bytes
 
+    def build_request_headers(self) -> dict[str, str]:
+        headers = {"Accept-Encoding": "identity"}
+        if isinstance(self.parent.user_agent, dict):
+            headers.update(self.parent.user_agent)
+        if self.parent.headers_dict:
+            headers.update(self.parent.headers_dict)
+        if self.parent.referer:
+            headers.setdefault("Referer", self.parent.referer)
+        return headers
+
     async def _await_connection(self, awaitable, label: str):
         timeout = float(self.parent.connect_timeout or 30)
         delay = min(float(self.parent.connect_progress_delay or 0), timeout)
@@ -152,6 +162,8 @@ class Downloader:
             raise ConnectionTimeoutSkip(
                 f"Connection to {label} timed out after {int(timeout)}s"
             ) from e
+        except aiohttp.ClientConnectionError as e:
+            raise ConnectionTimeoutSkip(f"Connection to {label} failed") from e
         finally:
             if progress_task is not None:
                 self.parent._progress.remove_task(progress_task)
@@ -263,10 +275,7 @@ class Downloader:
 
     async def get_headers(self) -> dict:
         async with self._build_client_session() as session:
-            headers_to_send = {"Accept-Encoding": "identity"}
-            # 合并全局自定义 HTTP 头
-            if self.parent.headers_dict:
-                headers_to_send.update(self.parent.headers_dict)
+            headers_to_send = self.build_request_headers()
             async with session.head(
                 self.url,
                 allow_redirects=True,
@@ -509,6 +518,26 @@ class Downloader:
         await asyncio.to_thread(os.replace, temp_path, dest_path)
         await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
 
+    def target_path_if_named(self) -> str | None:
+        if not self.filename:
+            return None
+        return os.path.join(self.filepath, self.filename)
+
+    async def skip_existing_named_target(self) -> bool:
+        target_path = self.target_path_if_named()
+        if not target_path or not os.path.exists(target_path):
+            return False
+        if self.parent.quit_if_exists:
+            self.parent._logger.info(
+                f"File {self.filename} already exists, skipping."
+            )
+            self._done = True
+            return True
+        if not self.parent.auto_file_renaming:
+            await self.parent.pop(self.url)
+            return True
+        return False
+
     async def check_integrity(self):
         if self.parent.check_integrity:
             if self.md5 is None:
@@ -542,24 +571,12 @@ class Downloader:
         parsed = False
         while _iter >= 0:
             try:
+                if await self.skip_existing_named_target():
+                    return self.url
                 if not parsed:
                     await self.parse_config()
                     parsed = True
-                # quit 模式：目标文件已存在则跳过
-                if self.parent.quit_if_exists and os.path.exists(
-                    os.path.join(self.filepath, self.filename)
-                ):
-                    self._logger.info(
-                        f"File {self.filename} already exists, skipping."
-                    )
-                    self._done = True
-                    return self.url
-                if (
-                    self.filename is not None
-                    and os.path.exists(os.path.join(self.filepath, self.filename))
-                    and not self.parent.auto_file_renaming
-                ):
-                    await self.parent.pop(self.url)
+                if await self.skip_existing_named_target():
                     return self.url
                 self.task = None
                 await self._start_download()
