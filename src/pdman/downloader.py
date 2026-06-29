@@ -2,6 +2,7 @@ import re
 import os
 import json
 import time
+import math
 import shutil
 import asyncio
 import hashlib
@@ -14,11 +15,16 @@ from rich.text import Text
 from urllib.parse import unquote
 from loguru._logger import Logger, Core
 
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .manager import Manager
 from .chunk import Chunk
+
+
+class ConnectionTimeoutSkip(Exception):
+    pass
 
 
 class Downloader:
@@ -89,7 +95,9 @@ class Downloader:
         elif self.pdm_tmp is None and self.parent.tmp_dir is None:
             self.pdm_tmp = os.path.join(self.filepath, f".pdman.{sha}")
         os.makedirs(self.pdm_tmp, exist_ok=True)
-        self.header_info = await self.get_headers()
+        self.header_info = await self._await_connection(
+            self.get_headers(), label=self.url
+        )
         self.filename = self.filename if self.filename else await self.get_file_name()
         os.makedirs(self.filepath, exist_ok=True)
         self.file_size = self.file_size or await self.get_url_file_size()
@@ -108,6 +116,45 @@ class Downloader:
     def refresh_downloaded_bytes(self) -> int:
         self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
         return self.downloaded_bytes
+
+    async def _await_connection(self, awaitable, label: str):
+        timeout = float(self.parent.connect_timeout or 30)
+        delay = min(float(self.parent.connect_progress_delay or 0), timeout)
+        started_at = time.monotonic()
+        task = asyncio.create_task(awaitable)
+        progress_task = None
+        try:
+            done, _ = await asyncio.wait({task}, timeout=delay)
+            if done:
+                return await task
+            while not task.done():
+                elapsed = time.monotonic() - started_at
+                remaining = max(0, math.ceil(timeout - elapsed))
+                if remaining <= 0:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+                    raise ConnectionTimeoutSkip(
+                        f"Connection to {label} timed out after {int(timeout)}s"
+                    )
+                description = f"Connecting {label} ({remaining}s left)"
+                if progress_task is None:
+                    progress_task = self.parent._progress.add_task(
+                        description, total=None, dl="wait"
+                    )
+                else:
+                    self.parent._progress.update(
+                        progress_task, description=description, dl="wait"
+                    )
+                await asyncio.sleep(min(self.parent.summary_interval, 1.0, remaining))
+            return await task
+        except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as e:
+            raise ConnectionTimeoutSkip(
+                f"Connection to {label} timed out after {int(timeout)}s"
+            ) from e
+        finally:
+            if progress_task is not None:
+                self.parent._progress.remove_task(progress_task)
 
     def _build_client_session(self, **overrides) -> aiohttp.ClientSession:
         """构建统一配置的 aiohttp.ClientSession，用于所有 HTTP 请求"""
@@ -520,6 +567,12 @@ class Downloader:
                 await self.check_integrity()
                 self._done = True
                 break
+            except ConnectionTimeoutSkip as e:
+                self._logger.warning(f"{e}, skipping.")
+                if self.pdm_tmp:
+                    await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
+                self._done = False
+                return self.url
             except Exception as e:
                 self._logger.debug(traceback.format_exc())
                 if _iter > 0:

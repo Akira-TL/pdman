@@ -143,13 +143,14 @@ pdman -N 4 -x 8 "https://example.com/file.bin"
 ### 重试与超时
 
 ```bash
-pdman --retry 5 --retry-wait 3 --timeout 120 --connect-timeout 20 "https://example.com/file.bin"
+pdman --retry 5 --retry-wait 3 --timeout 120 --connect-timeout 30 --connect-progress-delay 5 "https://example.com/file.bin"
 ```
 
 - `--retry`：任务失败重试次数。
 - `--retry-wait`：重试等待时间。
 - `--timeout`：请求总超时。
-- `--connect-timeout`：连接建立超时。
+- `--connect-timeout`：连接建立超时，默认 30 秒；超时后跳过该 URL。
+- `--connect-progress-delay`：连接等待提示延迟，默认 5 秒；超过该时间仍未连通时显示不确定进度条和剩余时间。
 - `--chunk-timeout`：分块下载超时。
 - `--chunk-retry-speed`：分块低速阈值，例如 `100K`。
 

@@ -61,7 +61,8 @@
 | `-r, --retry INT` | 任务失败重试次数 |
 | `-W, --retry-wait SECONDS` | 每次重试前等待秒数 |
 | `--timeout SECONDS` | HTTP 请求总超时 |
-| `--connect-timeout SECONDS` | 连接建立超时 |
+| `--connect-timeout SECONDS` | 连接建立超时，默认 30 秒；超时后跳过该 URL |
+| `--connect-progress-delay SECONDS` | 连接等待提示延迟，默认 5 秒；超过该时间仍未连通时显示不确定进度条和剩余时间 |
 | `--chunk-timeout SECONDS` | 分块下载超时 |
 | `--chunk-retry-speed SIZE` | 分块速度低于阈值时重启该分块，支持 `K` / `M` 后缀 |
 
@@ -146,7 +147,8 @@ max_concurrent_downloads: 8
 retry: 5
 retry_wait: 3
 timeout: 120
-connect_timeout: 20
+connect_timeout: 30
+connect_progress_delay: 5
 chunk_timeout: 30
 chunk_retry_speed: "100K"
 proxy: "http://127.0.0.1:7890"
