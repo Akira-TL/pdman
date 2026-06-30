@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -235,8 +236,8 @@ def test_find_latest_range_metadata_returns_newest_valid_file(tmp_path):
     newer_dir.mkdir(parents=True)
     older = write_metadata(older_dir)
     newer = write_metadata(newer_dir)
-    older.touch()
-    newer.touch()
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
 
     assert find_latest_range_metadata([tmp_path]) == newer
 

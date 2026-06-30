@@ -5,7 +5,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .range_metadata import DYNAMIC_RANGE_METADATA_SCHEMA_VERSION
+from .range_metadata import (
+    DYNAMIC_RANGE_METADATA_FILENAME,
+    DYNAMIC_RANGE_METADATA_SCHEMA_VERSION,
+)
 
 
 class RangeMetadataError(ValueError):
@@ -58,6 +61,30 @@ def _range_start(item: dict[str, Any]) -> tuple[int, int]:
 
 def _ranges(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in payload["ranges"] if isinstance(item, dict)]
+
+
+def find_latest_range_metadata(
+    roots: list[str | Path],
+) -> Path | None:
+    candidates: list[tuple[float, Path]] = []
+    for root in roots:
+        root_path = Path(root).expanduser()
+        if not root_path.exists():
+            continue
+        if root_path.is_file():
+            paths = [root_path] if root_path.name == DYNAMIC_RANGE_METADATA_FILENAME else []
+        else:
+            paths = root_path.rglob(DYNAMIC_RANGE_METADATA_FILENAME)
+        for path in paths:
+            try:
+                load_range_metadata(path)
+                mtime = path.stat().st_mtime
+            except (OSError, RangeMetadataError):
+                continue
+            candidates.append((mtime, path))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item[0], str(item[1])))[1]
 
 
 def filter_ranges(
