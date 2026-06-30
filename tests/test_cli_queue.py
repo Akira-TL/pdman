@@ -35,6 +35,34 @@ def test_cli_queue_add_url_and_list(tmp_path, capsys):
     assert "attempts=0" in output
 
 
+def test_cli_queue_add_json(tmp_path, capsys):
+    exit_code = cli.main(
+        [
+            "queue",
+            "add",
+            "--cache-dir",
+            str(tmp_path),
+            "--json",
+            "-d",
+            str(tmp_path / "downloads"),
+            "--file-name",
+            "file.bin",
+            "https://example.com/file.bin",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    records = load_queue(str(tmp_path))
+    assert exit_code == 0
+    assert payload["added"] == 1
+    assert payload["count"] == 1
+    assert payload["records"][0]["queue_id"] == records[0].queue_id
+    assert payload["records"][0]["url"] == "https://example.com/file.bin"
+    assert payload["records"][0]["file_name"] == "file.bin"
+    assert payload["records"][0]["dir_path"] == str(tmp_path / "downloads")
+    assert payload["records"][0]["status"] == "pending"
+
+
 def test_cli_queue_add_input_file(tmp_path):
     task_file = tmp_path / "tasks.yaml"
     task_file.write_text(
@@ -165,6 +193,24 @@ def test_cli_queue_list_json_and_jsonl(tmp_path, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert exit_code == 0
     assert [json.loads(line)["queue_id"] for line in lines] == ["q1", "q2"]
+
+
+def test_cli_queue_list_last_zero_json_returns_all_records(tmp_path, capsys):
+    records = [
+        QueueRecord(queue_id="q1", url="https://example.com/a.bin"),
+        QueueRecord(queue_id="q2", url="https://example.com/b.bin"),
+        QueueRecord(queue_id="q3", url="https://example.com/c.bin"),
+    ]
+    rewrite_queue(records, str(tmp_path))
+
+    exit_code = cli.main(
+        ["queue", "list", "--cache-dir", str(tmp_path), "--last", "0", "--json"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["count"] == 3
+    assert [record["queue_id"] for record in payload["records"]] == ["q1", "q2", "q3"]
 
 
 def test_cli_queue_start_no_pending_returns_zero(tmp_path, capsys):
@@ -423,6 +469,74 @@ def test_cli_queue_repair_fixes_invalid_queue(tmp_path, capsys):
     assert "Repaired queue:" in output
     assert len(records) == 2
     assert len({record.queue_id for record in records}) == 2
+
+
+def test_cli_queue_repair_json(tmp_path, capsys):
+    path = queue_path(str(tmp_path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "{bad-json}\n"
+        + json.dumps({"queue_id": "q1", "url": "https://example.com/a.bin"})
+        + "\n"
+        + json.dumps({"queue_id": "q1", "url": "https://example.com/b.bin"})
+        + "\n"
+    )
+
+    exit_code = cli.main(["queue", "repair", "--cache-dir", str(tmp_path), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["kept"] == 2
+    assert payload["dropped_malformed"] == 1
+    assert payload["dropped_invalid"] == 0
+    assert payload["dropped_unsupported_schema"] == 0
+    assert payload["fixed"] == 2
+
+
+def test_cli_queue_recover_remove_and_clear_json(tmp_path, capsys):
+    records = [
+        QueueRecord(queue_id="q1", url="https://example.com/a.bin", status="running"),
+        QueueRecord(queue_id="q2", url="https://example.com/b.bin", status="completed"),
+        QueueRecord(queue_id="q3", url="https://example.com/c.bin", status="failed"),
+    ]
+    rewrite_queue(records, str(tmp_path))
+
+    exit_code = cli.main(["queue", "recover", "--cache-dir", str(tmp_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {"recovered": 1}
+    records = load_queue(str(tmp_path))
+    assert records[0].status == "pending"
+
+    exit_code = cli.main(
+        ["queue", "remove", "q1", "missing", "--cache-dir", str(tmp_path), "--json"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {"requested": ["q1", "missing"], "removed": 1}
+    assert [record.queue_id for record in load_queue(str(tmp_path))] == ["q2", "q3"]
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "clear",
+            "--status",
+            "completed",
+            "--cache-dir",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {"cleared": 1, "status": "completed", "all": False}
+    assert [record.queue_id for record in load_queue(str(tmp_path))] == ["q3"]
+
+    exit_code = cli.main(["queue", "clear", "--all", "--cache-dir", str(tmp_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {"cleared": 1, "status": None, "all": True}
+    assert load_queue(str(tmp_path)) == []
 
 
 def test_cli_queue_recover_remove_and_clear(tmp_path, capsys):

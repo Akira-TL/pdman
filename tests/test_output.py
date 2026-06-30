@@ -1,6 +1,15 @@
 import json
 
-from pdman.output import print_jsonl, queue_records_payload, validation_report_payload
+from pdman.output import (
+    print_jsonl,
+    queue_add_payload,
+    queue_clear_payload,
+    queue_records_payload,
+    queue_recover_payload,
+    queue_remove_payload,
+    queue_repair_payload,
+    validation_report_payload,
+)
 from pdman.queue import QueueRecord, QueueValidationIssue, QueueValidationReport
 
 
@@ -22,6 +31,27 @@ def test_queue_records_payload_includes_count_and_records():
     assert payload["records"][0]["url"] == "https://example.com/file.bin"
     assert payload["records"][0]["status"] == "failed"
     assert payload["records"][0]["attempts"] == 3
+
+
+def test_queue_maintenance_payload_helpers():
+    record = QueueRecord(queue_id="q1", url="https://example.com/file.bin")
+
+    add_payload = queue_add_payload([record])
+
+    assert add_payload["added"] == 1
+    assert add_payload["count"] == 1
+    assert add_payload["records"][0]["queue_id"] == "q1"
+    assert queue_repair_payload({"kept": 1, "fixed": 0}) == {"kept": 1, "fixed": 0}
+    assert queue_recover_payload(2) == {"recovered": 2}
+    assert queue_remove_payload(["q1", "q2"], 1) == {
+        "requested": ["q1", "q2"],
+        "removed": 1,
+    }
+    assert queue_clear_payload(3, "completed", False) == {
+        "cleared": 3,
+        "status": "completed",
+        "all": False,
+    }
 
 
 def test_print_jsonl_emits_one_json_object_per_line(capsys):
