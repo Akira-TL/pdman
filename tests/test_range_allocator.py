@@ -117,6 +117,7 @@ def test_range_allocator_requeues_failed_range_until_retry_limit(tmp_path):
     assert first is not None
     assert first.attempts == 1
     assert allocator.mark_failed(first, "temporary failure") is True
+    assert allocator.requeue_count == 1
 
     retry = allocator.claim_next()
     assert retry is first
@@ -126,8 +127,27 @@ def test_range_allocator_requeues_failed_range_until_retry_limit(tmp_path):
     assert allocator.claim_next() is None
     assert allocator.has_failures
     assert allocator.failed_count == 1
+    assert allocator.retried_count == 1
     assert allocator.failed == [first]
     assert first.last_error == "permanent failure"
+
+
+def test_range_task_discard_partial_removes_file_and_resets_counter(tmp_path):
+    allocator = RangeAllocator(
+        file_size=8,
+        range_size=4,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    task = allocator.ranges[0]
+    task.path.write_bytes(b"123")
+    task.downloaded_bytes = 3
+
+    removed = task.discard_partial()
+
+    assert removed == 3
+    assert task.downloaded_bytes == 0
+    assert not task.path.exists()
 
 
 def test_range_task_detects_existing_complete_file(tmp_path):

@@ -12,6 +12,8 @@ class RangeTask:
     path: Path
     attempts: int = 0
     last_error: str | None = None
+    downloaded_bytes: int = 0
+    last_speed_bps: float | None = None
 
     @property
     def expected_size(self) -> int:
@@ -25,3 +27,10 @@ class RangeTask:
     @property
     def is_complete(self) -> bool:
         return self.existing_size() == self.expected_size
+
+    def discard_partial(self) -> int:
+        removed = self.path.stat().st_size if self.path.exists() else 0
+        if self.path.exists():
+            self.path.unlink()
+        self.downloaded_bytes = 0
+        return min(removed, self.expected_size)

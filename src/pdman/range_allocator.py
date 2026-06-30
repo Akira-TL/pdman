@@ -62,6 +62,7 @@ class RangeAllocator:
         self._active: dict[int, RangeTask] = {}
         self.completed: list[RangeTask] = []
         self.failed: list[RangeTask] = []
+        self.requeue_count = 0
 
     def _build_ranges(self) -> list[RangeTask]:
         ranges: list[RangeTask] = []
@@ -91,6 +92,7 @@ class RangeAllocator:
         self._active.pop(task.index, None)
         task.last_error = error
         if task.attempts <= self.max_retries:
+            self.requeue_count += 1
             self._pending.append(task)
             return True
         if task not in self.failed:
@@ -116,6 +118,10 @@ class RangeAllocator:
     @property
     def failed_count(self) -> int:
         return len(self.failed)
+
+    @property
+    def retried_count(self) -> int:
+        return sum(max(task.attempts - 1, 0) for task in self.ranges)
 
     @property
     def done(self) -> bool:
