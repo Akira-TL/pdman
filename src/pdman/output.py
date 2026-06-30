@@ -30,6 +30,18 @@ def resume_rejection_payload(source: TaskResult | dict[str, Any]) -> dict[str, A
     }
 
 
+def history_records_payload(
+    records: list[dict[str, Any]],
+    key: str = "records",
+) -> dict[str, Any]:
+    serialized = []
+    for record in records:
+        item = dict(record)
+        item["resume_rejection"] = resume_rejection_payload(record)
+        serialized.append(item)
+    return {key: serialized, "count": len(serialized)}
+
+
 def queue_record_to_dict(record: QueueRecord) -> dict[str, Any]:
     return record.to_dict()
 
