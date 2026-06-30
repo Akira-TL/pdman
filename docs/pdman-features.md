@@ -265,6 +265,8 @@ v0.6.1 将该 contract 接入 static `--continue` 路径：static 下载会在�
 
 v0.6.2 将同一 contract 扩展到 dynamic metadata emission：dynamic mode 会继续写 `dynamic-ranges.json` debug metadata，同时额外写 `resume-metadata.json`，其中 `mode=dynamic`，segments 直接来自当前 `RangeAllocator.ranges`。split 后的 parent / child range 会按真实 runtime layout 记录，不会重新按 range size 推导。`dynamic-ranges.json` 仍服务 readable / JSON / JSONL 诊断；`resume-metadata.json` 只服务未来 recovery contract。v0.6.2 不从 dynamic resume metadata 自动恢复下载，也不尝试修复 corrupted partial。
 
+v0.6.3 为 resume rejection 增加稳定 reason code 和统一可读日志，例如 `Resume rejected [file_size_mismatch]: ...`。这用于让用户和后续 agent 知道为什么拒绝复用 tmp。v0.6.3 不改变 exit code、不新增 JSON/JSONL resume 输出、不自动修复 partial，也不清理 legacy `.pdm` fallback。
+
 ---
 
 ## 6. 回调命令

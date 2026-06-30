@@ -167,6 +167,8 @@ v0.6.1 起，static 下载路径会在任务 tmp 目录写入 `resume-metadata.j
 
 v0.6.2 起，dynamic 下载也会写入 `resume-metadata.json`，并继续同时写入 `dynamic-ranges.json`。二者职责不同：`dynamic-ranges.json` 面向 debug inspection，包含 allocator stats、attempts、last_error、selector 等诊断字段；`resume-metadata.json` 面向未来 recovery contract，只记录 URL、目标文件身份、file size、etag / last-modified 和可恢复 segments。v0.6.2 只负责 emission 和校验，不会从 dynamic resume metadata 自动恢复下载。
 
+v0.6.3 起，resume metadata 被拒绝时会带稳定 reason code，并使用类似 `Resume rejected [file_size_mismatch]: ...` 的可读日志。当前仅改善诊断表达，不改变 exit code，不新增 JSON/JSONL resume diagnostics，也不自动修复或清理 legacy `.pdm` 行为。
+
 ### 重试与超时
 
 ```bash
