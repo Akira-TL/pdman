@@ -20,6 +20,7 @@ from .history import (
     query_history,
 )
 from .manager import Manager
+from .output import print_json, print_jsonl, queue_records_payload, validation_report_payload
 from .queue import append_queue, clear_queue, create_queue_records, finish_queue_records
 from .queue import format_queue, format_queue_validation, load_queue, query_queue
 from .queue import recover_running, remove_queue_records, repair_queue
@@ -123,19 +124,25 @@ def handle_queue_list_command(argv=None) -> int:
     parser.add_argument("--last", type=int, default=20)
     parser.add_argument("--attempts-ge", type=int, default=None)
     parser.add_argument("--attempts-lt", type=int, default=None)
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
-    print(
-        format_queue(
-            query_queue(
-                args.cache_dir,
-                status=args.status,
-                last=args.last,
-                attempts_ge=args.attempts_ge,
-                attempts_lt=args.attempts_lt,
-            )
-        )
+    records = query_queue(
+        args.cache_dir,
+        status=args.status,
+        last=args.last,
+        attempts_ge=args.attempts_ge,
+        attempts_lt=args.attempts_lt,
     )
+    if args.json:
+        print_json(queue_records_payload(records))
+        return 0
+    if args.jsonl:
+        print_jsonl(queue_records_payload(records)["records"])
+        return 0
+    print(format_queue(records))
     return 0
 
 
@@ -212,7 +219,13 @@ def handle_queue_retry_failed_command(argv=None) -> int:
     add_queue_run_args(parser)
     add_retry_policy_args(parser)
     parser.add_argument("--dry-run", action="store_true")
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
     args = parser.parse_args(argv)
+    if (args.json or args.jsonl) and not args.dry_run:
+        print("--json/--jsonl for retry-failed is only supported with --dry-run.")
+        return 1
     if args.dry_run:
         candidates = retry_failed_candidates(
             cache_dir=args.cache_dir,
@@ -220,7 +233,13 @@ def handle_queue_retry_failed_command(argv=None) -> int:
             max_attempts=args.max_attempts,
             error_contains=args.error_contains,
         )
-        if not candidates:
+        payload = queue_records_payload(candidates, key="candidates")
+        payload["dry_run"] = True
+        if args.json:
+            print_json(payload)
+        elif args.jsonl:
+            print_jsonl(payload["candidates"])
+        elif not candidates:
             print("No failed queue records to retry.")
         else:
             print(format_queue(candidates, title="Retry candidates:"))
@@ -234,10 +253,14 @@ def handle_queue_retry_failed_command(argv=None) -> int:
 
 def handle_queue_validate_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman queue validate")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     report = validate_queue(args.cache_dir)
-    print(format_queue_validation(report))
+    if args.json:
+        print_json(validation_report_payload(report))
+    else:
+        print(format_queue_validation(report))
     return 0 if report.ok else 1
 
 
