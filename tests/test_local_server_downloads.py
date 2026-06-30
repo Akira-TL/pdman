@@ -92,6 +92,15 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                     return
             self._send_payload(PAYLOAD, "slow-range-once.bin", send_body)
             return
+        if parsed.path == "/bad-content-range.bin":
+            self._send_bad_content_range_payload(PAYLOAD, "bad-content-range.bin", send_body)
+            return
+        if parsed.path == "/ignored-range.bin":
+            self._send_ignored_range_payload(PAYLOAD, "ignored-range.bin", send_body)
+            return
+        if parsed.path == "/short-range.bin":
+            self._send_short_range_payload(PAYLOAD, "short-range.bin", send_body)
+            return
         self._send_text(404, b"not found")
 
     def _send_text(self, status: int, body: bytes):
@@ -142,6 +151,42 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                 self.wfile.write(body[index:index + 512])
                 self.wfile.flush()
                 time.sleep(0.05)
+
+    def _send_bad_content_range_payload(self, data: bytes, filename: str, send_body: bool):
+        status, start, end, body = self._payload_range(data)
+        self.send_response(status)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(body)))
+        if status == 206:
+            bad_end = min(len(body) - 1, len(data) - 1)
+            self.send_header("Content-Range", f"bytes 0-{bad_end}/{len(data)}")
+        self.end_headers()
+        if send_body:
+            self.wfile.write(body)
+
+    def _send_ignored_range_payload(self, data: bytes, filename: str, send_body: bool):
+        self.send_response(200)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if send_body:
+            self.wfile.write(data)
+
+    def _send_short_range_payload(self, data: bytes, filename: str, send_body: bool):
+        status, start, end, body = self._payload_range(data)
+        if status == 206 and len(body) > 1:
+            body = body[:-1]
+        self.send_response(status)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(body)))
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+        self.end_headers()
+        if send_body:
+            self.wfile.write(body)
 
     def _send_unknown_size(self, send_body: bool):
         self.send_response(200)
@@ -268,6 +313,75 @@ def test_dynamic_segment_download_handles_uneven_file_with_four_workers(tmp_path
         assert (tmp_path / "dynamic-uneven.bin").read_bytes() == UNEVEN_PAYLOAD
         assert manager.results[0].status == TaskStatus.COMPLETED
         assert manager.exit_code == 0
+
+
+def test_dynamic_segment_download_rejects_bad_content_range(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/bad-content-range.bin"),
+            file_name="bad-content-range.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "bad-content-range.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert "Content-Range start mismatch" in (manager.results[0].error or "")
+        assert manager.exit_code == 1
+
+
+def test_dynamic_segment_download_rejects_ignored_range_response(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/ignored-range.bin"),
+            file_name="ignored-range.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "ignored-range.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert "HTTP 200 is only valid for full-file range" in (manager.results[0].error or "")
+        assert manager.exit_code == 1
+
+
+def test_dynamic_segment_download_rejects_short_range_body(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/short-range.bin"),
+            file_name="short-range.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "short-range.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert "incomplete" in (manager.results[0].error or "")
+        assert manager.exit_code == 1
 
 
 def test_dynamic_segment_download_recovers_flaky_ranges(tmp_path):
