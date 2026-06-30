@@ -168,7 +168,7 @@ def add_queue_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tmp", default=None)
     parser.add_argument("--tmp-policy", choices=("auto", "system", "target"), default="auto")
     parser.add_argument("--keep-tmp", action="store_true")
-    parser.add_argument("--segment-mode", choices=("static", "dynamic"), default="static")
+    parser.add_argument("--segment-mode", choices=("static", "dynamic", "auto"), default="static")
     parser.add_argument("--retry", type=int, default=3)
     parser.add_argument("--retry-wait", type=int, default=5)
 
@@ -536,9 +536,9 @@ def main(argv=None):
     )
     parser.add_argument(
         "--segment-mode",
-        choices=("static", "dynamic"),
+        choices=("static", "dynamic", "auto"),
         default="static",
-        help="Segmented download mode. static preserves legacy chunk slicing; dynamic uses the experimental range allocator.",
+        help="Segmented download mode. static preserves legacy chunk slicing; dynamic uses the experimental range allocator; auto selects dynamic only when eligible.",
     )
     parser.add_argument(
         "--cache-dir",

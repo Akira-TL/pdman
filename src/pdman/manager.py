@@ -417,7 +417,7 @@ class Manager:
         if self.tmp_policy not in {"auto", "system", "target"}:
             raise ValueError(f"Invalid tmp_policy: {self.tmp_policy}")
         self.segment_mode = (self.segment_mode or "static").lower()
-        if self.segment_mode not in {"static", "dynamic"}:
+        if self.segment_mode not in {"static", "dynamic", "auto"}:
             raise ValueError(f"Invalid segment_mode: {self.segment_mode}")
         # 加载配置文件（如果指定了 conf_path 且尚未加载）
         if self.conf_path is not None:
