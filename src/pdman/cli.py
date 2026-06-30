@@ -20,9 +20,10 @@ from .history import (
     query_history,
 )
 from .manager import Manager
-from .queue import append_queue, create_queue_records, format_queue, load_queue
-from .queue import mark_records_running, query_queue, rewrite_queue
-from .queue import update_queue_from_results
+from .queue import append_queue, clear_queue, create_queue_records, finish_queue_records
+from .queue import format_queue, format_queue_validation, load_queue, query_queue
+from .queue import recover_running, remove_queue_records, repair_queue
+from .queue import start_queue_records, validate_queue
 from .task_input import TaskInput, load_task_input
 
 
@@ -140,14 +141,6 @@ def handle_queue_start_command(argv=None) -> int:
     parser.add_argument("--retry-wait", type=int, default=5)
     args = parser.parse_args(argv)
 
-    records = load_queue(args.cache_dir)
-    selected = [record for record in records if record.status == args.status]
-    if args.limit and args.limit > 0:
-        selected = selected[:args.limit]
-    if not selected:
-        print("No queue records to start.")
-        return 0
-
     manager = Manager(
         max_downloads=args.max_downloads,
         max_concurrent_downloads=args.max_concurrent_downloads,
@@ -158,8 +151,15 @@ def handle_queue_start_command(argv=None) -> int:
         retry=args.retry,
         retry_wait=args.retry_wait,
     )
-    mark_records_running(selected, manager.run_id)
-    rewrite_queue(records, args.cache_dir)
+    selected = start_queue_records(
+        cache_dir=args.cache_dir,
+        status=args.status,
+        limit=args.limit,
+        run_id=manager.run_id,
+    )
+    if not selected:
+        print("No queue records to start.")
+        return 0
     for record in selected:
         manager.append(
             record.url,
@@ -168,9 +168,76 @@ def handle_queue_start_command(argv=None) -> int:
             dir_path=record.dir_path or os.getcwd(),
         )
     asyncio.run(manager.download())
-    update_queue_from_results(records, selected, manager.results, manager.run_id)
-    rewrite_queue(records, args.cache_dir)
+    finish_queue_records(
+        cache_dir=args.cache_dir,
+        selected_records=selected,
+        results=manager.results,
+        run_id=manager.run_id,
+    )
     return manager.exit_code
+
+
+def handle_queue_validate_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue validate")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    report = validate_queue(args.cache_dir)
+    print(format_queue_validation(report))
+    return 0 if report.ok else 1
+
+
+def handle_queue_repair_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue repair")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    stats = repair_queue(args.cache_dir)
+    print("Repaired queue:")
+    for key in (
+        "kept",
+        "dropped_malformed",
+        "dropped_invalid",
+        "dropped_unsupported_schema",
+        "fixed",
+    ):
+        print(f"  {key}: {stats[key]}")
+    return 0
+
+
+def handle_queue_recover_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue recover")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    recovered = recover_running(args.cache_dir)
+    print(f"Recovered {recovered} running queue record(s).")
+    return 0
+
+
+def handle_queue_remove_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue remove")
+    parser.add_argument("queue_ids", nargs="+")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    removed = remove_queue_records(args.queue_ids, args.cache_dir)
+    print(f"Removed {removed} queue record(s).")
+    return 0
+
+
+def handle_queue_clear_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue clear")
+    parser.add_argument("--status", choices=("pending", "running", "completed", "skipped", "failed"), default=None)
+    parser.add_argument("--all", dest="all_records", action="store_true")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    if not args.all_records and args.status is None:
+        print("queue clear requires --status STATUS or --all")
+        return 1
+    cleared = clear_queue(
+        status=args.status,
+        all_records=args.all_records,
+        cache_dir=args.cache_dir,
+    )
+    print(f"Cleared {cleared} queue record(s).")
+    return 0
 
 
 def handle_queue_command(argv=None) -> int:
@@ -185,6 +252,16 @@ def handle_queue_command(argv=None) -> int:
         return handle_queue_list_command(rest)
     if command == "start":
         return handle_queue_start_command(rest)
+    if command == "validate":
+        return handle_queue_validate_command(rest)
+    if command == "repair":
+        return handle_queue_repair_command(rest)
+    if command == "recover":
+        return handle_queue_recover_command(rest)
+    if command == "remove":
+        return handle_queue_remove_command(rest)
+    if command == "clear":
+        return handle_queue_clear_command(rest)
     print(f"Unknown queue command: {command}")
     return 1
 

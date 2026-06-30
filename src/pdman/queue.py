@@ -447,6 +447,40 @@ def update_queue_from_results(
     return records
 
 
+def start_queue_records(
+    *,
+    cache_dir: str | None,
+    status: str,
+    limit: int,
+    run_id: str,
+) -> list[QueueRecord]:
+    with queue_lock(cache_dir):
+        records = load_queue(cache_dir)
+        selected = [record for record in records if record.status == status]
+        if limit and limit > 0:
+            selected = selected[:limit]
+        if selected:
+            mark_records_running(selected, run_id)
+            _rewrite_queue_unlocked(records, cache_dir)
+        return selected
+
+
+def finish_queue_records(
+    *,
+    cache_dir: str | None,
+    selected_records: list[QueueRecord],
+    results: list[TaskResult],
+    run_id: str,
+) -> list[QueueRecord]:
+    selected_ids = {record.queue_id for record in selected_records}
+    with queue_lock(cache_dir):
+        records = load_queue(cache_dir)
+        current_selected = [record for record in records if record.queue_id in selected_ids]
+        update_queue_from_results(records, current_selected, results, run_id)
+        _rewrite_queue_unlocked(records, cache_dir)
+        return records
+
+
 def format_queue(records: list[QueueRecord]) -> str:
     if not records:
         return "No queue records found."
