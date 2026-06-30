@@ -17,6 +17,7 @@ from pathlib import Path
 from loguru._logger import Logger, Core
 
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -105,6 +106,12 @@ class IntegrityCheckFailure(Exception):
         )
 
 
+@dataclass(frozen=True)
+class DynamicSegmentDecision:
+    use_dynamic: bool
+    reason: str
+
+
 class Downloader:
     def __init__(
         self,
@@ -136,6 +143,7 @@ class Downloader:
         self.status_reason_code: TaskReason | None = None
         self.status_error: str | None = None
         self.result: TaskResult | None = None
+        self.segment_decision_reason: str | None = None
         self._logger = Logger(
             core=Core(),
             exception=None,
@@ -255,28 +263,43 @@ class Downloader:
         self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
         return self.downloaded_bytes
 
-    def _can_use_dynamic_segments(self) -> bool:
-        if self.parent.segment_mode != "dynamic":
-            return False
+    def _dynamic_segment_decision(self) -> DynamicSegmentDecision:
+        mode = self.parent.segment_mode
+        if mode == "static":
+            return DynamicSegmentDecision(False, "segment_mode_static")
         if self.parent.continue_download:
-            self._logger.info(
-                "Dynamic segment mode does not support --continue yet; falling back to static mode."
-            )
-            return False
+            return DynamicSegmentDecision(False, "continue_not_supported")
         if self.file_size <= 0:
-            self._logger.info(
-                "Dynamic segment mode requires a known file size; falling back to static mode."
-            )
-            return False
+            return DynamicSegmentDecision(False, "unknown_file_size")
         accept_ranges = ""
         if self.header_info is not None:
             accept_ranges = str(self.header_info.get("Accept-Ranges", "")).lower()
         if accept_ranges != "bytes":
+            return DynamicSegmentDecision(False, "accept_ranges_not_bytes")
+        if self.parent.force_sequential:
+            return DynamicSegmentDecision(False, "force_sequential_enabled")
+        if self.parent.max_concurrent_downloads <= 1:
+            return DynamicSegmentDecision(False, "insufficient_workers")
+        min_split_size = self.parent.min_split_size or self.file_size
+        if self.file_size < min_split_size * 2:
+            return DynamicSegmentDecision(False, "file_too_small")
+        return DynamicSegmentDecision(True, "dynamic_eligible")
+
+    def _can_use_dynamic_segments(self) -> bool:
+        decision = self._dynamic_segment_decision()
+        self.segment_decision_reason = decision.reason
+        mode = self.parent.segment_mode
+        if decision.use_dynamic:
+            if mode == "auto":
+                self._logger.info(
+                    "Auto segment mode selected dynamic: dynamic_eligible"
+                )
+            return True
+        if mode in {"dynamic", "auto"}:
             self._logger.info(
-                "Dynamic segment mode requires Accept-Ranges: bytes; falling back to static mode."
+                f"Dynamic segment mode fallback to static: {decision.reason}"
             )
-            return False
-        return True
+        return False
 
     def _build_range_allocator(self) -> RangeAllocator:
         worker_count = max(1, self.parent.max_concurrent_downloads)
