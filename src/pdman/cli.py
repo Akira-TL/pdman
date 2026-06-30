@@ -23,7 +23,7 @@ from .manager import Manager
 from .queue import append_queue, clear_queue, create_queue_records, finish_queue_records
 from .queue import format_queue, format_queue_validation, load_queue, query_queue
 from .queue import recover_running, remove_queue_records, repair_queue
-from .queue import start_queue_records, validate_queue
+from .queue import retry_failed_candidates, start_queue_records, validate_queue
 from .task_input import TaskInput, load_task_input
 
 
@@ -121,9 +121,21 @@ def handle_queue_list_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman queue list")
     parser.add_argument("--status", choices=("pending", "running", "completed", "skipped", "failed"), default=None)
     parser.add_argument("--last", type=int, default=20)
+    parser.add_argument("--attempts-ge", type=int, default=None)
+    parser.add_argument("--attempts-lt", type=int, default=None)
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
-    print(format_queue(query_queue(args.cache_dir, status=args.status, last=args.last)))
+    print(
+        format_queue(
+            query_queue(
+                args.cache_dir,
+                status=args.status,
+                last=args.last,
+                attempts_ge=args.attempts_ge,
+                attempts_lt=args.attempts_lt,
+            )
+        )
+    )
     return 0
 
 
@@ -137,6 +149,11 @@ def add_queue_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--keep-tmp", action="store_true")
     parser.add_argument("--retry", type=int, default=3)
     parser.add_argument("--retry-wait", type=int, default=5)
+
+
+def add_retry_policy_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--max-attempts", type=int, default=None)
+    parser.add_argument("--error-contains", default=None)
 
 
 def run_queue_records(args, *, status: str, empty_message: str) -> int:
@@ -155,6 +172,8 @@ def run_queue_records(args, *, status: str, empty_message: str) -> int:
         status=status,
         limit=args.limit,
         run_id=manager.run_id,
+        max_attempts=getattr(args, "max_attempts", None),
+        error_contains=getattr(args, "error_contains", None),
     )
     if not selected:
         print(empty_message)
@@ -191,7 +210,21 @@ def handle_queue_start_command(argv=None) -> int:
 def handle_queue_retry_failed_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman queue retry-failed")
     add_queue_run_args(parser)
+    add_retry_policy_args(parser)
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.dry_run:
+        candidates = retry_failed_candidates(
+            cache_dir=args.cache_dir,
+            limit=args.limit,
+            max_attempts=args.max_attempts,
+            error_contains=args.error_contains,
+        )
+        if not candidates:
+            print("No failed queue records to retry.")
+        else:
+            print(format_queue(candidates, title="Retry candidates:"))
+        return 0
     return run_queue_records(
         args,
         status="failed",
