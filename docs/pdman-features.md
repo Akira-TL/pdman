@@ -330,9 +330,11 @@ v0.4.3 引入本地 JSONL 队列基础：
 
 ```bash
 pdman queue add "https://example.com/file.bin"
+pdman queue add --json "https://example.com/file.bin"
 pdman queue add -i tasks.yaml
 pdman queue add -d /data/downloads --file-name file.bin "https://example.com/file.bin"
 pdman queue list
+pdman queue list --last 0
 pdman queue list --status pending
 pdman queue list --status failed --attempts-ge 3
 pdman queue list --json
@@ -349,10 +351,15 @@ pdman queue retry-failed --error-contains "HTTP 503"
 pdman queue validate
 pdman queue validate --json
 pdman queue repair
+pdman queue repair --json
 pdman queue recover
+pdman queue recover --json
 pdman queue remove <queue-id>
+pdman queue remove <queue-id> --json
 pdman queue clear --status completed
+pdman queue clear --status completed --json
 pdman queue clear --all
+pdman queue clear --all --json
 ```
 
 queue record schema：
@@ -399,6 +406,17 @@ v0.4.7 增加 queue structured output 基础，目标是让人、脚本和后续
 | `queue retry-failed --dry-run --jsonl` | 每行一个 retry candidate；不修改 queue |
 | `queue validate --json` | 输出 `{ok, valid, malformed, invalid, duplicate_ids, unsupported_schema, issues}` |
 
+v0.4.8 继续补齐 queue 维护命令的 JSON 输出，但仍限制在不会启动真实下载的 queue 文件操作范围内。
+
+| 命令 | 输出契约 |
+| --- | --- |
+| `queue add --json` | 输出 `{added, records, count}` |
+| `queue repair --json` | 输出 `{kept, dropped_malformed, dropped_invalid, dropped_unsupported_schema, fixed}` |
+| `queue recover --json` | 输出 `{recovered}` |
+| `queue remove --json` | 输出 `{requested, removed}` |
+| `queue clear --json` | 输出 `{cleared, status, all}` |
+| `queue list --last 0` | 不限制数量，返回匹配的全部 records；可和 `--json/--jsonl` 搭配 |
+
 限制：`retry-failed --json/--jsonl` 只支持和 `--dry-run` 搭配；实际执行下载、普通 download summary、history/runs 查询仍保持人类文本输出。完整 agent event stream 仍属于后续 v0.9.x 范围。
 
 v0.4.6 增加 retry policy 人工控制边界：
@@ -428,7 +446,7 @@ v0.4.4 加固内容：
 | `queue remove` | 按 queue_id 删除记录 |
 | `queue clear` | 按状态或 `--all` 清理记录 |
 
-限制：v0.4.7 不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon、SQLite、网络文件系统强一致锁、全局 JSON/JSONL 输出协议或 agent event stream。
+限制：v0.4.8 不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon、SQLite、网络文件系统强一致锁、全局 JSON/JSONL 输出协议或 agent event stream。
 
 ---
 

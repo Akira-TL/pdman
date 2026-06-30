@@ -253,9 +253,11 @@ v0.4.3 开始，可以把任务写入本地队列后再启动下载：
 
 ```bash
 pdman queue add "https://example.com/file.bin"
+pdman queue add --json "https://example.com/file.bin"
 pdman queue add -i tasks.yaml
 pdman queue add -d /data/downloads --file-name file.bin "https://example.com/file.bin"
 pdman queue list
+pdman queue list --last 0
 pdman queue list --status pending
 pdman queue list --status failed --attempts-ge 3
 pdman queue list --json
@@ -272,10 +274,15 @@ pdman queue retry-failed --error-contains "HTTP 503"
 pdman queue validate
 pdman queue validate --json
 pdman queue repair
+pdman queue repair --json
 pdman queue recover
+pdman queue recover --json
 pdman queue remove <queue-id>
+pdman queue remove <queue-id> --json
 pdman queue clear --status completed
+pdman queue clear --status completed --json
 pdman queue clear --all
+pdman queue clear --all --json
 ```
 
 队列文件位于 `~/.cache/pdman/queue.jsonl`。`queue start` 会读取 `pending` 任务，使用真实 `Manager` 执行下载，并把队列状态更新为 `completed`、`skipped` 或 `failed`。
@@ -285,6 +292,8 @@ v0.4.5 开始，queue record 会记录 `attempts`。每次 `queue start` 或 `qu
 v0.4.6 开始，queue record 会记录 `last_status_reason`，用于保存最近一次 completed/skipped/failed 的原因。`retry-failed --dry-run` 只预览候选，不修改 queue；`--max-attempts N` 只重试 `attempts < N` 的失败记录；`--error-contains TEXT` 只重试 `last_error` 包含指定文本的失败记录，匹配不区分大小写。
 
 v0.4.7 开始，queue 查询/预览/校验命令提供最小结构化输出：`queue list --json` 输出 `{records, count}`，`queue list --jsonl` 每行输出一个 queue record；`queue retry-failed --dry-run --json` 输出 `{candidates, count, dry_run}`，`--jsonl` 每行输出一个候选 record；`queue validate --json` 输出 `{ok, valid, malformed, invalid, duplicate_ids, unsupported_schema, issues}`。`retry-failed --json/--jsonl` 只允许和 `--dry-run` 搭配，普通下载和实际 retry 执行输出仍保持人类文本。
+
+v0.4.8 开始，queue 的非下载类维护命令继续补齐 JSON 输出：`queue add --json` 输出 `{added, records, count}`，`queue repair --json` 输出 repair stats，`queue recover --json` 输出 `{recovered}`，`queue remove --json` 输出 `{requested, removed}`，`queue clear --json` 输出 `{cleared, status, all}`。`queue list --last 0` 表示不限制数量，返回匹配的全部 queue records。
 
 v0.4.4 开始，queue record 会写入 `schema_version=1`，queue 写操作会使用 `~/.cache/pdman/queue.lock`。锁 backend 会按平台自动选择：Linux/macOS/BSD 使用 `fcntl`，Windows 使用 `msvcrt`，其他平台使用原子目录锁 fallback。
 
