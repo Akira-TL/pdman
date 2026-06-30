@@ -263,6 +263,15 @@ class Downloader:
         self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
         return self.downloaded_bytes
 
+    def _accepts_byte_ranges(self) -> bool:
+        if self.header_info is None:
+            return False
+        accept_ranges = self.header_info.get("Accept-Ranges")
+        if accept_ranges is None:
+            return False
+        tokens = [token.strip().lower() for token in str(accept_ranges).split(",")]
+        return "bytes" in tokens
+
     def _dynamic_segment_decision(self) -> DynamicSegmentDecision:
         mode = self.parent.segment_mode
         if mode == "static":
@@ -271,10 +280,7 @@ class Downloader:
             return DynamicSegmentDecision(False, "continue_not_supported")
         if self.file_size <= 0:
             return DynamicSegmentDecision(False, "unknown_file_size")
-        accept_ranges = ""
-        if self.header_info is not None:
-            accept_ranges = str(self.header_info.get("Accept-Ranges", "")).lower()
-        if accept_ranges != "bytes":
+        if not self._accepts_byte_ranges():
             return DynamicSegmentDecision(False, "accept_ranges_not_bytes")
         if self.parent.force_sequential:
             return DynamicSegmentDecision(False, "force_sequential_enabled")
@@ -505,10 +511,16 @@ class Downloader:
         file_size = None
         if self.header_info is not None:
             file_size = self.header_info.get("Content-Length")
-        if file_size:
-            return int(file_size)
-        else:
+        if not file_size:
             return -1
+        try:
+            parsed_size = int(file_size)
+        except (TypeError, ValueError):
+            self._logger.warning(f"Invalid Content-Length header: {file_size!r}")
+            return -1
+        if parsed_size <= 0:
+            return -1
+        return parsed_size
 
     def get_file_size(self) -> int:
         return self.file_size
