@@ -80,7 +80,7 @@ def range_metadata_summary(
     all_ranges = _ranges(payload)
     state_counts = Counter(str(item.get("state", "unknown")) for item in all_ranges)
     filtered_state_counts = Counter(str(item.get("state", "unknown")) for item in ranges)
-    return {
+    summary = {
         "schema_version": payload["schema_version"],
         "mode": payload["mode"],
         "file_size": payload.get("file_size"),
@@ -92,6 +92,10 @@ def range_metadata_summary(
         "filtered_state_counts": dict(sorted(filtered_state_counts.items())),
         "ranges": ranges,
     }
+    selector = payload.get("selector")
+    if isinstance(selector, dict):
+        summary["selector"] = dict(selector)
+    return summary
 
 
 def _format_size_pair(item: dict[str, Any]) -> str:
@@ -147,6 +151,17 @@ def format_range_metadata(
         title,
         f"schema_version: {summary['schema_version']}",
         f"mode: {summary['mode']}",
+    ]
+    selector = summary.get("selector")
+    if isinstance(selector, dict):
+        lines.append(
+            "selector: "
+            f"requested={selector.get('requested_mode')} "
+            f"selected={selector.get('selected_mode')} "
+            f"reason={selector.get('reason')} "
+            f"fallback_reason={selector.get('fallback_reason')}"
+        )
+    lines.extend([
         f"file_size: {summary['file_size']}",
         f"range_size: {summary['range_size']}",
         "ranges: "
@@ -161,7 +176,7 @@ def format_range_metadata(
         f"requeued={stats.get('requeue_count', 0)} "
         f"split={stats.get('split_count', 0)}",
         f"completed_bytes: {stats.get('completed_bytes', 0)}",
-    ]
+    ])
 
     if state is None:
         failed_ranges = filter_ranges(payload, state="failed")

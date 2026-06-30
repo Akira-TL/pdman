@@ -134,6 +134,7 @@ class Downloader:
         self.range_allocator: RangeAllocator | None = None
         self.downloaded_bytes: int = 0
         self.lock = asyncio.Lock()
+        self.metadata_lock = asyncio.Lock()
         self.header_info = None
         self.log_path = log_path
         self._downloaded = False
@@ -144,6 +145,8 @@ class Downloader:
         self.status_error: str | None = None
         self.result: TaskResult | None = None
         self.segment_decision_reason: str | None = None
+        self.segment_selected_mode: str | None = None
+        self.segment_fallback_reason: str | None = None
         self._logger = Logger(
             core=Core(),
             exception=None,
@@ -294,6 +297,8 @@ class Downloader:
     def _can_use_dynamic_segments(self) -> bool:
         decision = self._dynamic_segment_decision()
         self.segment_decision_reason = decision.reason
+        self.segment_selected_mode = "dynamic" if decision.use_dynamic else "static"
+        self.segment_fallback_reason = None if decision.use_dynamic else decision.reason
         mode = self.parent.segment_mode
         if decision.use_dynamic:
             if mode == "auto":
@@ -306,6 +311,19 @@ class Downloader:
                 f"Dynamic segment mode fallback to static: {decision.reason}"
             )
         return False
+
+    def _dynamic_selector_payload(self) -> dict[str, str | None]:
+        reason = self.segment_decision_reason or "dynamic_eligible"
+        selected_mode = self.segment_selected_mode or "dynamic"
+        fallback_reason = self.segment_fallback_reason
+        if selected_mode == "dynamic":
+            fallback_reason = None
+        return {
+            "requested_mode": self.parent.segment_mode,
+            "selected_mode": selected_mode,
+            "fallback_reason": fallback_reason,
+            "reason": reason,
+        }
 
     def _build_range_allocator(self) -> RangeAllocator:
         worker_count = max(1, self.parent.max_concurrent_downloads)
@@ -934,12 +952,14 @@ class Downloader:
             return
         metadata_path = Path(self.pdm_tmp) / DYNAMIC_RANGE_METADATA_FILENAME
         try:
-            await asyncio.to_thread(
-                write_range_metadata,
-                metadata_path,
-                self.range_allocator,
-                file_size=self.file_size,
-            )
+            async with self.metadata_lock:
+                await asyncio.to_thread(
+                    write_range_metadata,
+                    metadata_path,
+                    self.range_allocator,
+                    file_size=self.file_size,
+                    selector=self._dynamic_selector_payload(),
+                )
         except Exception as e:
             self._logger.warning(f"Failed to write dynamic range metadata: {e}")
 

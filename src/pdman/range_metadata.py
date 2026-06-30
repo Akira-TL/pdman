@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -32,8 +33,9 @@ def range_allocator_payload(
     allocator: RangeAllocator,
     *,
     file_size: int | None = None,
+    selector: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": DYNAMIC_RANGE_METADATA_SCHEMA_VERSION,
         "mode": "dynamic",
         "file_size": allocator.file_size if file_size is None else file_size,
@@ -54,6 +56,9 @@ def range_allocator_payload(
             for task in allocator.ranges
         ],
     }
+    if selector is not None:
+        payload["selector"] = dict(selector)
+    return payload
 
 
 def write_range_metadata(
@@ -61,11 +66,29 @@ def write_range_metadata(
     allocator: RangeAllocator,
     *,
     file_size: int | None = None,
+    selector: dict[str, Any] | None = None,
 ) -> None:
     metadata_path = Path(path)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = range_allocator_payload(allocator, file_size=file_size)
-    metadata_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    payload = range_allocator_payload(
+        allocator,
+        file_size=file_size,
+        selector=selector,
     )
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=metadata_path.parent,
+            prefix=f".{metadata_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_file.write(rendered)
+            temp_path = Path(temp_file.name)
+        temp_path.replace(metadata_path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
