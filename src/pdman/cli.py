@@ -224,7 +224,11 @@ def handle_queue_retry_failed_command(argv=None) -> int:
     output_group.add_argument("--jsonl", action="store_true")
     args = parser.parse_args(argv)
     if (args.json or args.jsonl) and not args.dry_run:
-        print("--json/--jsonl for retry-failed is only supported with --dry-run.")
+        print(
+            "--json/--jsonl for retry-failed only supports preview mode. "
+            "Use --dry-run with --json/--jsonl, or omit --json/--jsonl "
+            "to execute retries with human-readable output."
+        )
         return 1
     if args.dry_run:
         candidates = retry_failed_candidates(

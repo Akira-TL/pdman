@@ -322,7 +322,9 @@ def test_cli_queue_retry_failed_json_requires_dry_run(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert exit_code == 1
-    assert "only supported with --dry-run" in output
+    assert "only supports preview mode" in output
+    assert "Use --dry-run with --json/--jsonl" in output
+    assert "human-readable output" in output
 
 
 def test_cli_queue_retry_failed_max_attempts_and_error_contains_filters(tmp_path):
