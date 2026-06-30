@@ -385,7 +385,7 @@ def test_dynamic_segment_download_rejects_bad_content_range(tmp_path):
         assert manager.exit_code == 1
 
 
-def test_dynamic_failed_download_with_keep_tmp_retains_range_metadata(tmp_path):
+def test_dynamic_failed_download_with_keep_tmp_retains_range_and_resume_metadata(tmp_path):
     with LocalDownloadServer() as server:
         tmp_root = tmp_path / "tmp"
         manager = Manager(
@@ -416,6 +416,18 @@ def test_dynamic_failed_download_with_keep_tmp_retains_range_metadata(tmp_path):
             "Content-Range start mismatch" in (item["last_error"] or "")
             for item in payload["ranges"]
         )
+
+        resume_files = list(tmp_root.glob(f"**/{RESUME_METADATA_FILENAME}"))
+        assert len(resume_files) == 1
+        resume_payload = json.loads(resume_files[0].read_text())
+        assert resume_payload["schema_version"] == 2
+        assert resume_payload["kind"] == "resume"
+        assert resume_payload["mode"] == "dynamic"
+        assert resume_payload["file_size"] == len(PAYLOAD)
+        assert any(item["state"] == "failed" for item in resume_payload["segments"])
+        assert "ranges" not in resume_payload
+        assert "stats" not in resume_payload
+
         assert manager.results[0].status == TaskStatus.FAILED
         assert manager.exit_code == 1
 
