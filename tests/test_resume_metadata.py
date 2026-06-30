@@ -8,6 +8,8 @@ from pdman.resume_metadata import (
     RESUME_METADATA_KIND,
     RESUME_METADATA_SCHEMA_VERSION,
     ResumeMetadataError,
+    ResumeRejectionCode,
+    format_resume_rejection,
     dynamic_resume_metadata_payload,
     inspect_resume_segments,
     load_resume_metadata,
@@ -51,6 +53,38 @@ def resume_payload(tmp_path):
             },
         ],
     }
+
+
+def test_resume_metadata_error_exposes_reason_code():
+    error = ResumeMetadataError("bad metadata", ResumeRejectionCode.SCHEMA_VERSION_UNSUPPORTED)
+
+    assert error.reason_code == ResumeRejectionCode.SCHEMA_VERSION_UNSUPPORTED
+    assert format_resume_rejection(error) == "Resume rejected [schema_version_unsupported]: bad metadata"
+
+
+def test_validate_resume_metadata_sets_rejection_codes(tmp_path):
+    payload = resume_payload(tmp_path)
+    payload["schema_version"] = 1
+    with pytest.raises(ResumeMetadataError) as exc_info:
+        validate_resume_metadata(payload)
+    assert exc_info.value.reason_code == ResumeRejectionCode.SCHEMA_VERSION_UNSUPPORTED
+
+    payload = resume_payload(tmp_path)
+    payload["kind"] = "debug"
+    with pytest.raises(ResumeMetadataError) as exc_info:
+        validate_resume_metadata(payload)
+    assert exc_info.value.reason_code == ResumeRejectionCode.KIND_MISMATCH
+
+    payload = resume_payload(tmp_path)
+    with pytest.raises(ResumeMetadataError) as exc_info:
+        validate_resume_metadata(payload, expected_url="https://example.invalid/other.bin")
+    assert exc_info.value.reason_code == ResumeRejectionCode.URL_MISMATCH
+
+    payload = resume_payload(tmp_path)
+    payload["segments"][1]["existing_size"] = 2048
+    with pytest.raises(ResumeMetadataError) as exc_info:
+        validate_resume_metadata(payload)
+    assert exc_info.value.reason_code == ResumeRejectionCode.PARTIAL_TOO_LARGE
 
 
 def test_dynamic_resume_metadata_payload_serializes_range_tasks(tmp_path):
