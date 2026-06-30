@@ -64,6 +64,76 @@ def test_cli_history_shows_resume_rejection(tmp_path, capsys):
     assert "Resume rejected [file_size_mismatch]: file_size mismatch" in output
 
 
+def test_cli_history_json_includes_resume_rejection_payload(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "filename": "resumed.bin",
+                "status": "completed",
+                "downloaded_bytes": 1024,
+                "resume_rejection_code": "file_size_mismatch",
+                "resume_rejection_reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+            }
+        ],
+    )
+
+    exit_code = cli.main(["history", "--json", "--cache-dir", str(tmp_path)])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["count"] == 1
+    assert payload["records"][0]["filename"] == "resumed.bin"
+    assert payload["records"][0]["resume_rejection"] == {
+        "present": True,
+        "code": "file_size_mismatch",
+        "reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+    }
+
+
+def test_cli_history_jsonl_outputs_one_record_per_line(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "filename": "resumed.bin",
+                "status": "completed",
+                "downloaded_bytes": 1024,
+                "resume_rejection_code": "url_mismatch",
+                "resume_rejection_reason": "Resume rejected [url_mismatch]: url mismatch",
+            },
+            {
+                "run_id": "run-1",
+                "filename": "fresh.bin",
+                "status": "completed",
+                "downloaded_bytes": 2048,
+            },
+        ],
+    )
+
+    exit_code = cli.main(["history", "--jsonl", "--cache-dir", str(tmp_path)])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert len(lines) == 2
+    first = json.loads(lines[0])
+    second = json.loads(lines[1])
+    assert first["filename"] == "resumed.bin"
+    assert first["resume_rejection"] == {
+        "present": True,
+        "code": "url_mismatch",
+        "reason": "Resume rejected [url_mismatch]: url mismatch",
+    }
+    assert second["filename"] == "fresh.bin"
+    assert second["resume_rejection"] == {
+        "present": False,
+        "code": None,
+        "reason": None,
+    }
+
+
 def test_cli_history_failed_filter(tmp_path, capsys):
     write_history(
         tmp_path,
