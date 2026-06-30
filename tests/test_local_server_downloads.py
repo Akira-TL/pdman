@@ -16,6 +16,7 @@ from pdman.status import TaskReason, TaskStatus
 PAYLOAD = (b"pdman-local-test-" * 8192) + b"end"
 UNKNOWN_SIZE_PAYLOAD = b"unknown-size-body" * 1024
 REQUIRED_UA = "PDMAN-Integration-Test/1.0"
+FLAKY_COUNTS = {}
 DiskUsage = namedtuple("DiskUsage", "total used free")
 
 
@@ -58,6 +59,14 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         if parsed.path == "/status.bin":
             status = int(parse_qs(parsed.query).get("status", ["503"])[0])
             self._send_text(status, f"HTTP {status}".encode())
+            return
+        if parsed.path == "/flaky.bin":
+            key = self.path
+            FLAKY_COUNTS[key] = FLAKY_COUNTS.get(key, 0) + 1
+            if FLAKY_COUNTS[key] == 1:
+                self._send_text(503, b"flaky first failure")
+                return
+            self._send_payload(PAYLOAD, "flaky.bin", send_body)
             return
         self._send_text(404, b"not found")
 
@@ -273,6 +282,118 @@ def test_queue_start_downloads_from_local_http_server(tmp_path):
         assert records[0].status == "completed"
         assert records[0].last_run_id is not None
         assert records[0].last_error is None
+        assert records[0].attempts == 1
+
+
+def test_queue_retry_failed_succeeds_against_flaky_local_http_server(tmp_path):
+    FLAKY_COUNTS.clear()
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        download_dir = tmp_path / "downloads"
+        add_exit = cli.main(
+            [
+                "queue",
+                "add",
+                "--cache-dir",
+                str(cache_dir),
+                "-d",
+                str(download_dir),
+                "--file-name",
+                "flaky.bin",
+                server.url("/flaky.bin"),
+            ]
+        )
+        first_exit = cli.main(
+            [
+                "queue",
+                "start",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "--retry",
+                "0",
+            ]
+        )
+        first_records = load_queue(str(cache_dir))
+        retry_exit = cli.main(
+            [
+                "queue",
+                "retry-failed",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "-N",
+                "1",
+                "-x",
+                "1",
+            ]
+        )
+
+        assert add_exit == 0
+        assert first_exit == 1
+        assert first_records[0].status == "failed"
+        assert first_records[0].attempts == 1
+        assert first_records[0].last_error == "HTTP 503 during header check"
+        assert retry_exit == 0
+        assert (download_dir / "flaky.bin").read_bytes() == PAYLOAD
+        records = load_queue(str(cache_dir))
+        assert records[0].status == "completed"
+        assert records[0].attempts == 2
+        assert records[0].last_error is None
+
+
+def test_queue_retry_failed_records_second_failure(tmp_path):
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        download_dir = tmp_path / "downloads"
+        add_exit = cli.main(
+            [
+                "queue",
+                "add",
+                "--cache-dir",
+                str(cache_dir),
+                "-d",
+                str(download_dir),
+                "--file-name",
+                "failed-retry.bin",
+                server.url("/status.bin?status=503"),
+            ]
+        )
+        first_exit = cli.main(
+            [
+                "queue",
+                "start",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "--retry",
+                "0",
+            ]
+        )
+        retry_exit = cli.main(
+            [
+                "queue",
+                "retry-failed",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "--retry",
+                "0",
+            ]
+        )
+
+        assert add_exit == 0
+        assert first_exit == 1
+        assert retry_exit == 1
+        assert not (download_dir / "failed-retry.bin").exists()
+        records = load_queue(str(cache_dir))
+        assert records[0].status == "failed"
+        assert records[0].attempts == 2
+        assert records[0].last_error == "HTTP 503 during header check"
 
 
 def test_queue_start_records_failed_local_http_result(tmp_path):
