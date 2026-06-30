@@ -35,6 +35,13 @@ from .queue import append_queue, clear_queue, create_queue_records, finish_queue
 from .queue import format_queue, format_queue_validation, load_queue, query_queue
 from .queue import recover_running, remove_queue_records, repair_queue
 from .queue import retry_failed_candidates, start_queue_records, validate_queue
+from .range_metadata_inspect import (
+    RangeMetadataError,
+    filter_ranges,
+    format_range_metadata,
+    load_range_metadata,
+    range_metadata_summary,
+)
 from .task_input import TaskInput, load_task_input
 
 
@@ -382,6 +389,47 @@ def handle_queue_command(argv=None) -> int:
     return 1
 
 
+def handle_debug_ranges_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman debug ranges")
+    parser.add_argument("metadata_file")
+    parser.add_argument(
+        "--state",
+        choices=("pending", "active", "completed", "failed", "unknown"),
+        default=None,
+    )
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
+    args = parser.parse_args(argv)
+
+    try:
+        payload = load_range_metadata(args.metadata_file)
+    except RangeMetadataError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    if args.json:
+        print_json(range_metadata_summary(payload, state=args.state))
+        return 0
+    if args.jsonl:
+        print_jsonl(filter_ranges(payload, state=args.state))
+        return 0
+    print(format_range_metadata(payload, state=args.state, source_path=args.metadata_file))
+    return 0
+
+
+def handle_debug_command(argv=None) -> int:
+    argv = list(argv or [])
+    if not argv:
+        print("Debug command required: ranges")
+        return 1
+    command, rest = argv[0], argv[1:]
+    if command == "ranges":
+        return handle_debug_ranges_command(rest)
+    print(f"Unknown debug command: {command}")
+    return 1
+
+
 def handle_subcommand(argv=None) -> int:
     argv = list(argv or [])
     if not argv:
@@ -395,12 +443,14 @@ def handle_subcommand(argv=None) -> int:
         return handle_run_command(rest)
     if command == "queue":
         return handle_queue_command(rest)
+    if command == "debug":
+        return handle_debug_command(rest)
     return 1
 
 
 def main(argv=None):
     argv = list(argv) if argv is not None else sys.argv[1:]
-    if argv and argv[0] in {"history", "runs", "run", "queue"}:
+    if argv and argv[0] in {"history", "runs", "run", "queue", "debug"}:
         return handle_subcommand(argv)
 
     parser = argparse.ArgumentParser()
