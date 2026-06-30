@@ -147,7 +147,16 @@ pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
 pdman --segment-mode auto -x 4 -k 1M "https://example.com/file.bin"
 ```
 
-`--segment-mode dynamic` 会使用 range allocator 生成可领取的 ranges，多 worker 持续领取 range 并按 offset 合并。`--segment-mode auto` 会在文件大小已知、服务端声明 `Accept-Ranges: bytes`、未启用 `--continue`、未强制顺序下载、worker 数大于 1 且文件足够大时选择 dynamic，否则回退 static；默认仍是 static。v0.5.1 起 dynamic range size 会按文件大小、worker 数和 `--min-split-size` 计算：至少不小于 `--min-split-size`，目标约为每个 worker 4 个 ranges，并按 64 KiB 边界对齐，避免大文件产生过多小 range。v0.5.2 起，dynamic range 下载失败或低于 `--chunk-retry-speed` 时会删除该 range 的 partial 文件并重新入队，超过 `--retry` 后任务失败。v0.5.3 起，低速 range 会优先把已下载 partial 保留为 completed range，并把剩余区间拆成 child range 继续下载；普通网络失败仍保持删除 partial 后 retry。v0.5.4 起，dynamic mode 会校验 206 响应的 `Content-Range` start/end/total，partial range 收到 200、缺失或不匹配的 `Content-Range`、短 body 都会作为 range failure 处理。v0.5.5 起，dynamic mode 会在任务 tmp 目录写入 `dynamic-ranges.json` debug metadata draft，记录 range states、attempts、errors、speed 和 allocator stats；该文件只用于调试，不是 resume contract。v0.5.x 暂不做 dynamic resume 或默认启用 dynamic。
+`--segment-mode dynamic` 会使用 range allocator 生成可领取的 ranges，多 worker 持续领取 range 并按 offset 合并。`--segment-mode auto` 会在文件大小已知、服务端声明 `Accept-Ranges: bytes`、未启用 `--continue`、未强制顺序下载、worker 数大于 1 且文件足够大时选择 dynamic，否则回退 static；默认仍是 static。v0.5.1 起 dynamic range size 会按文件大小、worker 数和 `--min-split-size` 计算：至少不小于 `--min-split-size`，目标约为每个 worker 4 个 ranges，并按 64 KiB 边界对齐，避免大文件产生过多小 range。v0.5.2 起，dynamic range 下载失败或低于 `--chunk-retry-speed` 时会删除该 range 的 partial 文件并重新入队，超过 `--retry` 后任务失败。v0.5.3 起，低速 range 会优先把已下载 partial 保留为 completed range，并把剩余区间拆成 child range 继续下载；普通网络失败仍保持删除 partial 后 retry。v0.5.4 起，dynamic mode 会校验 206 响应的 `Content-Range` start/end/total，partial range 收到 200、缺失或不匹配的 `Content-Range`、短 body 都会作为 range failure 处理。v0.5.5 起，dynamic mode 会在任务 tmp 目录写入 `dynamic-ranges.json` debug metadata draft，记录 range states、attempts、errors、speed 和 allocator stats；v0.5.7 起可用 `pdman debug ranges` 读取该文件并输出 readable / JSON / JSONL 诊断结果。该 metadata 只用于调试，不是 resume contract。v0.5.x 暂不做 dynamic resume 或默认启用 dynamic。
+
+```bash
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --state failed
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --json
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --jsonl
+```
+
+`pdman debug ranges` 只读取 v0.5.5+ 的 dynamic debug metadata；不会恢复下载，不会修改 metadata 或下载文件，也不承诺跨大版本 metadata 兼容。
 
 ### 重试与超时
 

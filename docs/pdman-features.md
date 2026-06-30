@@ -206,6 +206,17 @@ v0.5.4 起，dynamic mode 会校验 Range 响应：`206` 必须包含 `Content-R
 
 v0.5.5 起，dynamic mode 会在任务 tmp 目录写入 `dynamic-ranges.json` debug metadata draft，记录 schema version、range size、allocator stats、每个 range 的 state、attempts、last_error、downloaded bytes、existing size、expected size、last_speed_bps 和 path。该文件只用于调试和后续 resume 设计参考，不是稳定 resume contract；成功清理 tmp 时会随 tmp 删除，失败且保留 tmp 时可直接查看。
 
+v0.5.7 起，`pdman debug ranges <dynamic-ranges.json>` 可以直接检查该 metadata：
+
+```bash
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --state failed
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --json
+pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --jsonl
+```
+
+默认输出 readable 诊断摘要；`--json` 输出包含 `filter`、`stats`、`state_counts` 和过滤后 `ranges` 的结构化 payload；`--jsonl` 每个 range 输出一行 JSON，方便脚本和 agent 管道消费。`--state` 支持 `pending`、`active`、`completed`、`failed`、`unknown`。该命令只读取 v0.5.5+ 的 dynamic debug metadata，不恢复下载、不修改 metadata 或下载文件，也不保证跨大版本 metadata 兼容。
+
 v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
 ---
