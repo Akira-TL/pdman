@@ -3,10 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from pdman.range_allocator import RangeAllocator
 from pdman.resume_metadata import (
     RESUME_METADATA_KIND,
     RESUME_METADATA_SCHEMA_VERSION,
     ResumeMetadataError,
+    dynamic_resume_metadata_payload,
     inspect_resume_segments,
     load_resume_metadata,
     static_resume_metadata_payload,
@@ -49,6 +51,64 @@ def resume_payload(tmp_path):
             },
         ],
     }
+
+
+def test_dynamic_resume_metadata_payload_serializes_range_tasks(tmp_path):
+    allocator = RangeAllocator(
+        file_size=2048,
+        range_size=1024,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    first = allocator.claim_next()
+    assert first is not None
+    first.path.write_bytes(b"x" * first.expected_size)
+    allocator.mark_completed(first)
+    second = allocator.claim_next()
+    assert second is not None
+    second.path.write_bytes(b"y" * 12)
+
+    payload = dynamic_resume_metadata_payload(
+        url="https://example.invalid/file.bin",
+        filename="file.bin",
+        target_path=tmp_path / "file.bin",
+        file_size=2048,
+        allocator=allocator,
+        etag="abc123",
+        last_modified="Wed, 01 Jan 2025 00:00:00 GMT",
+        created_at="2026-06-30T00:00:00Z",
+        updated_at="2026-06-30T00:00:00Z",
+    )
+
+    assert payload["schema_version"] == RESUME_METADATA_SCHEMA_VERSION
+    assert payload["kind"] == RESUME_METADATA_KIND
+    assert payload["mode"] == "dynamic"
+    assert payload["url"] == "https://example.invalid/file.bin"
+    assert payload["target_path"] == str(tmp_path / "file.bin")
+    assert payload["file_size"] == 2048
+    assert payload["etag"] == "abc123"
+    assert payload["last_modified"] == "Wed, 01 Jan 2025 00:00:00 GMT"
+    assert payload["segments"] == [
+        {
+            "index": 0,
+            "start": 0,
+            "end": 1023,
+            "path": str(first.path),
+            "expected_size": 1024,
+            "existing_size": 1024,
+            "state": "completed",
+        },
+        {
+            "index": 1,
+            "start": 1024,
+            "end": 2047,
+            "path": str(second.path),
+            "expected_size": 1024,
+            "existing_size": 12,
+            "state": "partial",
+        },
+    ]
+    validate_resume_metadata(payload)
 
 
 def test_static_resume_metadata_payload_serializes_chunk_chain(tmp_path):
