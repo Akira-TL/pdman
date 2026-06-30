@@ -156,6 +156,8 @@ class Downloader:
         self.status_reason: str | None = None
         self.status_reason_code: TaskReason | None = None
         self.status_error: str | None = None
+        self.resume_rejection_code: str | None = None
+        self.resume_rejection_reason: str | None = None
         self.result: TaskResult | None = None
         self.segment_decision_reason: str | None = None
         self.segment_selected_mode: str | None = None
@@ -273,6 +275,8 @@ class Downloader:
             reason_code=reason_code or self.status_reason_code,
             error=error or self.status_error,
             downloaded_bytes=self._result_bytes(),
+            resume_rejection_code=self.resume_rejection_code,
+            resume_rejection_reason=self.resume_rejection_reason,
             total_bytes=self.file_size if self.file_size > 0 else None,
         )
         return self.result
@@ -699,8 +703,11 @@ class Downloader:
                 )
                 return self._chunks_from_resume_segments(inspect_resume_segments(payload))
             except ResumeMetadataError as e:
+                rejection_message = format_resume_rejection(e)
+                self.resume_rejection_code = e.reason_code.value
+                self.resume_rejection_reason = rejection_message
                 self._logger.warning(
-                    f"{format_resume_rejection(e)}; discarding stale temp files"
+                    f"{rejection_message}; discarding stale temp files"
                 )
                 self._reset_tmp_with_pdm_info()
                 return None

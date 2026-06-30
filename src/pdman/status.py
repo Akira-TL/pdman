@@ -38,6 +38,8 @@ class TaskResult:
     error: str | None = None
     downloaded_bytes: int = 0
     total_bytes: int | None = None
+    resume_rejection_code: str | None = None
+    resume_rejection_reason: str | None = None
 
     @property
     def failed(self) -> bool:

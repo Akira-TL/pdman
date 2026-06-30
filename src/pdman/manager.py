@@ -720,6 +720,12 @@ class Manager:
             f"  failed: {len(failed)}",
             f"  downloaded: {self._format_bytes(downloaded)}",
         ]
+        resume_rejected = [r for r in self.results if r.resume_rejection_reason]
+        if resume_rejected:
+            lines.append("Resume:")
+            for result in resume_rejected:
+                name = result.filename or result.url
+                lines.append(f"  {name} - {result.resume_rejection_reason}")
         if skipped:
             lines.append("Skipped:")
             for result in skipped:
