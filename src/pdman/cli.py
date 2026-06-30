@@ -20,6 +20,10 @@ from .history import (
     query_history,
 )
 from .manager import Manager
+from .queue import append_queue, create_queue_records, format_queue, load_queue
+from .queue import mark_records_running, query_queue, rewrite_queue
+from .queue import update_queue_from_results
+from .task_input import TaskInput, load_task_input
 
 
 def get_version() -> str:
@@ -79,7 +83,113 @@ def handle_run_command(argv=None) -> int:
     return 0
 
 
-def handle_query_command(argv=None) -> int:
+def handle_queue_add_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue add")
+    parser.add_argument("urls", nargs="*")
+    parser.add_argument("-i", "--input-file", action="append", default=[])
+    parser.add_argument("-d", "--dir", dest="dir_path", default=None)
+    parser.add_argument("--file-name", default=None)
+    parser.add_argument("--md5", default=None)
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+
+    tasks = []
+    for input_file in args.input_file:
+        tasks.extend(load_task_input(input_file))
+    for index, url in enumerate(args.urls):
+        file_name = args.file_name if len(args.urls) == 1 and index == 0 else None
+        tasks.append(
+            TaskInput(
+                url=url,
+                file_name=file_name,
+                dir_path=args.dir_path,
+                md5=args.md5,
+            )
+        )
+    if args.dir_path:
+        for task in tasks:
+            if task.dir_path is None:
+                task.dir_path = args.dir_path
+    records = create_queue_records(tasks)
+    append_queue(records, args.cache_dir)
+    print(f"Added {len(records)} queue record(s).")
+    return 0
+
+
+def handle_queue_list_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue list")
+    parser.add_argument("--status", choices=("pending", "running", "completed", "skipped", "failed"), default=None)
+    parser.add_argument("--last", type=int, default=20)
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    print(format_queue(query_queue(args.cache_dir, status=args.status, last=args.last)))
+    return 0
+
+
+def handle_queue_start_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue start")
+    parser.add_argument("--cache-dir", default=None)
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--status", choices=("pending", "failed"), default="pending")
+    parser.add_argument("-N", "--max-downloads", type=int, default=4)
+    parser.add_argument("-x", "--max-concurrent-downloads", type=int, default=5)
+    parser.add_argument("--tmp", default=None)
+    parser.add_argument("--tmp-policy", choices=("auto", "system", "target"), default="auto")
+    parser.add_argument("--keep-tmp", action="store_true")
+    parser.add_argument("--retry", type=int, default=3)
+    parser.add_argument("--retry-wait", type=int, default=5)
+    args = parser.parse_args(argv)
+
+    records = load_queue(args.cache_dir)
+    selected = [record for record in records if record.status == args.status]
+    if args.limit and args.limit > 0:
+        selected = selected[:args.limit]
+    if not selected:
+        print("No queue records to start.")
+        return 0
+
+    manager = Manager(
+        max_downloads=args.max_downloads,
+        max_concurrent_downloads=args.max_concurrent_downloads,
+        tmp_dir=args.tmp,
+        tmp_policy=args.tmp_policy,
+        cache_dir=args.cache_dir,
+        keep_tmp=args.keep_tmp,
+        retry=args.retry,
+        retry_wait=args.retry_wait,
+    )
+    mark_records_running(selected, manager.run_id)
+    rewrite_queue(records, args.cache_dir)
+    for record in selected:
+        manager.append(
+            record.url,
+            md5=record.md5,
+            file_name=record.file_name,
+            dir_path=record.dir_path or os.getcwd(),
+        )
+    asyncio.run(manager.download())
+    update_queue_from_results(records, selected, manager.results, manager.run_id)
+    rewrite_queue(records, args.cache_dir)
+    return manager.exit_code
+
+
+def handle_queue_command(argv=None) -> int:
+    argv = list(argv or [])
+    if not argv:
+        print("Queue command required: add, list, or start")
+        return 1
+    command, rest = argv[0], argv[1:]
+    if command == "add":
+        return handle_queue_add_command(rest)
+    if command == "list":
+        return handle_queue_list_command(rest)
+    if command == "start":
+        return handle_queue_start_command(rest)
+    print(f"Unknown queue command: {command}")
+    return 1
+
+
+def handle_subcommand(argv=None) -> int:
     argv = list(argv or [])
     if not argv:
         return 1
@@ -90,13 +200,15 @@ def handle_query_command(argv=None) -> int:
         return handle_runs_command(rest)
     if command == "run":
         return handle_run_command(rest)
+    if command == "queue":
+        return handle_queue_command(rest)
     return 1
 
 
 def main(argv=None):
     argv = list(argv) if argv is not None else sys.argv[1:]
-    if argv and argv[0] in {"history", "runs", "run"}:
-        return handle_query_command(argv)
+    if argv and argv[0] in {"history", "runs", "run", "queue"}:
+        return handle_subcommand(argv)
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
