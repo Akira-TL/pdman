@@ -98,6 +98,27 @@ def test_validate_resume_metadata_rejects_file_size_mismatch(tmp_path):
         validate_resume_metadata(payload, expected_file_size=4096)
 
 
+def test_validate_resume_metadata_rejects_identity_mismatch(tmp_path):
+    payload = resume_payload(tmp_path)
+
+    with pytest.raises(ResumeMetadataError, match="url mismatch"):
+        validate_resume_metadata(payload, expected_url="https://example.invalid/other.bin")
+    with pytest.raises(ResumeMetadataError, match="target_path mismatch"):
+        validate_resume_metadata(payload, expected_target_path=str(tmp_path / "other.bin"))
+    with pytest.raises(ResumeMetadataError, match="etag mismatch"):
+        validate_resume_metadata(payload, expected_etag="different")
+    with pytest.raises(ResumeMetadataError, match="last_modified mismatch"):
+        validate_resume_metadata(payload, expected_last_modified="Thu, 02 Jan 2025 00:00:00 GMT")
+
+
+def test_validate_resume_metadata_rejects_missing_identity_fields(tmp_path):
+    for field in ("url", "filename", "target_path"):
+        payload = resume_payload(tmp_path)
+        payload[field] = ""
+        with pytest.raises(ResumeMetadataError, match=f"{field} must be a non-empty string"):
+            validate_resume_metadata(payload)
+
+
 def test_validate_resume_metadata_rejects_segment_layout_mismatch(tmp_path):
     payload = resume_payload(tmp_path)
     expected_segments = [
