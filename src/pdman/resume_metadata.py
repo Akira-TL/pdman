@@ -66,6 +66,7 @@ def validate_resume_metadata(
     *,
     expected_file_size: int | None = None,
     expected_segments: list[dict[str, Any]] | None = None,
+    inspect_partials: bool = False,
 ) -> None:
     schema_version = payload.get("schema_version")
     if schema_version != RESUME_METADATA_SCHEMA_VERSION:
@@ -99,6 +100,47 @@ def validate_resume_metadata(
 
     if expected_segments is not None:
         _validate_expected_layout(normalized_segments, expected_segments)
+
+    if inspect_partials:
+        for segment in inspect_resume_segments(payload):
+            if segment["existing_size"] > segment["expected_size"]:
+                raise ResumeMetadataError(
+                    "segment partial larger than expected: "
+                    f"index={segment['index']} existing_size={segment['existing_size']} "
+                    f"expected_size={segment['expected_size']}"
+                )
+
+
+def inspect_resume_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return resume segments annotated with current partial file sizes.
+
+    The original payload is not mutated. This is intentionally read-only: it lets
+    future resume/recovery flows compare metadata intent with the files currently
+    present on disk before reusing partial content.
+    """
+
+    validate_resume_metadata(payload)
+    inspected: list[dict[str, Any]] = []
+    for raw_segment in payload["segments"]:
+        segment = dict(raw_segment)
+        path = Path(segment["path"]).expanduser()
+        try:
+            existing_size = path.stat().st_size
+        except OSError:
+            existing_size = 0
+        expected_size = segment["expected_size"]
+        segment["existing_size"] = existing_size
+        segment["state"] = _state_for_existing_size(existing_size, expected_size)
+        inspected.append(segment)
+    return inspected
+
+
+def _state_for_existing_size(existing_size: int, expected_size: int) -> str:
+    if existing_size <= 0:
+        return "pending"
+    if existing_size == expected_size:
+        return "completed"
+    return "partial"
 
 
 def _require_int(
