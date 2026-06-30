@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .manager import Manager
-from .chunk import Chunk
+from .chunk import Chunk, STREAM_CHUNK_SIZE
+from .range_allocator import RangeAllocator
+from .range_task import RangeTask
 from .runtime import TmpSpaceInsufficient
 from .status import TaskReason, TaskResult, TaskStatus
 
@@ -89,6 +91,7 @@ class Downloader:
         self.pdm_tmp = pdm_tmp
         self.file_size: int = 0
         self.chunk_root: Chunk | None = None
+        self.range_allocator: RangeAllocator | None = None
         self.downloaded_bytes: int = 0
         self.lock = asyncio.Lock()
         self.header_info = None
@@ -218,6 +221,39 @@ class Downloader:
     def refresh_downloaded_bytes(self) -> int:
         self.downloaded_bytes = sum(self.chunk_root) if self.chunk_root else 0
         return self.downloaded_bytes
+
+    def _can_use_dynamic_segments(self) -> bool:
+        if self.parent.segment_mode != "dynamic":
+            return False
+        if self.parent.continue_download:
+            self._logger.info(
+                "Dynamic segment mode does not support --continue yet; falling back to static mode."
+            )
+            return False
+        if self.file_size <= 0:
+            self._logger.info(
+                "Dynamic segment mode requires a known file size; falling back to static mode."
+            )
+            return False
+        accept_ranges = ""
+        if self.header_info is not None:
+            accept_ranges = str(self.header_info.get("Accept-Ranges", "")).lower()
+        if accept_ranges != "bytes":
+            self._logger.info(
+                "Dynamic segment mode requires Accept-Ranges: bytes; falling back to static mode."
+            )
+            return False
+        return True
+
+    def _build_range_allocator(self) -> RangeAllocator:
+        range_size = self.parent.min_split_size or self.file_size
+        return RangeAllocator(
+            file_size=self.file_size,
+            range_size=range_size,
+            tmp_dir=self.pdm_tmp,
+            filename=self.filename,
+            max_retries=self.parent.retry,
+        )
 
     def build_request_headers(self) -> dict[str, str]:
         headers = {"Accept-Encoding": "identity"}
@@ -691,6 +727,175 @@ class Downloader:
                 raise IntegrityCheckFailure(self.filename, self.md5, file_md5)
         return True
 
+    async def _download_range_task(self, task: RangeTask) -> RangeTask:
+        task.path.parent.mkdir(parents=True, exist_ok=True)
+        raw_existing = task.path.stat().st_size if task.path.exists() else 0
+        if raw_existing > task.expected_size:
+            task.path.unlink()
+            raw_existing = 0
+        if raw_existing == task.expected_size:
+            return task
+        file_mode = "ab" if raw_existing else "wb"
+        async with (
+            self._build_client_session() as session,
+            aiofiles.open(task.path, file_mode) as f,
+        ):
+            pos = raw_existing
+            headers = self.build_request_headers()
+            headers["Range"] = f"bytes={task.start + pos}-{task.end}"
+            async with session.get(
+                self.url,
+                headers=headers,
+                timeout=self.parent.chunk_timeout,
+            ) as response:
+                full_file_range = task.start == 0 and task.end == self.file_size - 1
+                if response.status == 200 and not full_file_range:
+                    raise RuntimeError(
+                        f"server ignored Range request for {task.start}-{task.end}"
+                    )
+                if response.status not in (200, 206):
+                    raise RuntimeError(
+                        f"HTTP {response.status} while downloading range {task.start}-{task.end}"
+                    )
+                async for data in response.content.iter_chunked(STREAM_CHUNK_SIZE):
+                    remaining = task.expected_size - pos
+                    if remaining <= 0:
+                        break
+                    data = data[:remaining]
+                    await f.write(data)
+                    written = len(data)
+                    pos += written
+                    async with self.lock:
+                        self.downloaded_bytes += written
+                    if self._per_task_limiter:
+                        await self._per_task_limiter.acquire(written)
+                    if self.parent._global_limiter:
+                        await self.parent._global_limiter.acquire(written)
+        if task.path.stat().st_size != task.expected_size:
+            raise RuntimeError(
+                f"range {task.start}-{task.end} incomplete: "
+                f"{task.path.stat().st_size}/{task.expected_size} bytes"
+            )
+        return task
+
+    async def _dynamic_worker(self, allocator: RangeAllocator) -> None:
+        while True:
+            task = allocator.claim_next()
+            if task is None:
+                return
+            try:
+                await self._download_range_task(task)
+                allocator.mark_completed(task)
+            except Exception as e:
+                if not allocator.mark_failed(task, str(e)):
+                    raise
+                await asyncio.sleep(self.parent.retry_wait)
+
+    async def _start_dynamic_download(self) -> None:
+        allocator = self._build_range_allocator()
+        self.range_allocator = allocator
+        self.downloaded_bytes = sum(task.existing_size() for task in allocator.ranges)
+        workers = []
+
+        async def progress_run():
+            self.task = self.parent._progress.add_task(
+                f"Downloading {self.filename}",
+                total=self.file_size,
+                completed=self.downloaded_bytes,
+                dl=0,
+            )
+            while self.downloaded_bytes < self.file_size:
+                self.parent._progress.update(
+                    self.task,
+                    completed=min(self.downloaded_bytes, self.file_size),
+                    dl=len([worker for worker in workers if not worker.done()]),
+                )
+                await asyncio.sleep(self.parent.summary_interval)
+            self.parent._progress.update(
+                self.task,
+                completed=min(self.downloaded_bytes, self.file_size),
+                dl=0,
+            )
+            self.parent._logger.info(f"Completed downloading {self.filename}")
+
+        self.progress = asyncio.create_task(progress_run())
+        worker_count = min(self.parent.max_concurrent_downloads, len(allocator.ranges))
+        workers = [
+            asyncio.create_task(self._dynamic_worker(allocator))
+            for _ in range(worker_count)
+        ]
+        try:
+            await asyncio.gather(*workers)
+            if allocator.has_failures:
+                failed = allocator.failed[0]
+                raise RuntimeError(
+                    f"range {failed.start}-{failed.end} failed: {failed.last_error}"
+                )
+            await self.progress
+        except Exception:
+            if not self.progress.done():
+                self.progress.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self.progress
+            for worker in workers:
+                if not worker.done():
+                    worker.cancel()
+            if workers:
+                await asyncio.gather(*workers, return_exceptions=True)
+            raise
+
+    async def merge_range_tasks(self):
+        self.set_status(TaskStatus.MERGING)
+        assert self.range_allocator is not None
+        if os.path.exists(os.path.join(self.filepath, self.filename)):
+            suffixs = self.filename.split(".")
+            if len(suffixs) > 2 and suffixs[-2] == "tar":
+                suffix = ".".join(suffixs[-2:])
+            else:
+                suffix = suffixs[-1]
+            prefix = self.filename[: -len(suffix) - 1]
+            redownloaded_files = set(
+                glob(os.path.join(self.filepath, f"{prefix}(*).{suffix}"))
+            )
+            index = 0
+            while True:
+                index += 1
+                if (
+                    os.path.join(self.filepath, f"{prefix}({index}).{suffix}")
+                    not in redownloaded_files
+                ):
+                    self.filename = f"{prefix}({index}).{suffix}"
+                    break
+        dest_path = os.path.join(self.filepath, self.filename)
+        temp_path = dest_path + ".tmp"
+        self.parent._progress.update(
+            self.task,
+            description=f"Merging {self.filename}",
+            total=self.file_size,
+            completed=0,
+        )
+        last_time = time.time()
+        merge_chunk = 0
+        async with aiofiles.open(temp_path, "wb") as outfile:
+            for task in sorted(self.range_allocator.completed, key=lambda item: item.start):
+                async with aiofiles.open(task.path, "rb") as infile:
+                    while True:
+                        data = await infile.read(64 * 1024)
+                        if not data:
+                            break
+                        await outfile.write(data)
+                        if last_time + 1 < time.time():
+                            self.parent._progress.update(
+                                self.task, advance=merge_chunk + len(data)
+                            )
+                            last_time = time.time()
+                            merge_chunk = 0
+                        else:
+                            merge_chunk += len(data)
+        self.parent._progress.remove_task(self.task)
+        await asyncio.to_thread(os.replace, temp_path, dest_path)
+        await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
+
     async def start_download(self, _iter=None):
         if _iter is None:
             _iter = self.parent.retry
@@ -706,8 +911,12 @@ class Downloader:
                     return self.result
                 self.task = None
                 self.set_status(TaskStatus.DOWNLOADING)
-                await self._start_download()
-                await self.merge_chunks()
+                if self._can_use_dynamic_segments():
+                    await self._start_dynamic_download()
+                    await self.merge_range_tasks()
+                else:
+                    await self._start_download()
+                    await self.merge_chunks()
                 await self.check_integrity()
                 self._done = True
                 self.record_result(
