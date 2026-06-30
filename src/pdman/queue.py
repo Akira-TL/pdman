@@ -54,6 +54,7 @@ class QueueRecord:
     updated_at: str | None = None
     last_run_id: str | None = None
     last_error: str | None = None
+    attempts: int = 0
     schema_version: int = QUEUE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -67,6 +68,9 @@ class QueueRecord:
             raise ValueError("url is required")
         if self.status not in QUEUE_STATUSES:
             raise ValueError(f"Invalid queue status: {self.status}")
+        self.attempts = int(self.attempts or 0)
+        if self.attempts < 0:
+            raise ValueError("attempts cannot be negative")
         now = utc_now_iso()
         if self.created_at is None:
             self.created_at = now
@@ -88,6 +92,7 @@ class QueueRecord:
             updated_at=data.get("updated_at"),
             last_run_id=data.get("last_run_id"),
             last_error=data.get("last_error"),
+            attempts=int(data.get("attempts", 0) or 0),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -247,6 +252,14 @@ def validate_queue(cache_dir: str | None = None) -> QueueValidationReport:
         if data.get("status", "pending") not in QUEUE_STATUSES:
             _issue(report, line_no, "invalid", "invalid status", queue_id)
             continue
+        try:
+            attempts = int(data.get("attempts", 0) or 0)
+        except (TypeError, ValueError):
+            _issue(report, line_no, "invalid", "invalid attempts", queue_id)
+            continue
+        if attempts < 0:
+            _issue(report, line_no, "invalid", "invalid attempts", queue_id)
+            continue
         seen_ids.add(queue_id)
         report.valid += 1
     return report
@@ -315,6 +328,15 @@ def repair_queue(cache_dir: str | None = None) -> dict[str, int]:
                 data["status"] = "failed"
                 data["last_error"] = "repaired invalid queue status"
                 fixed = True
+            try:
+                attempts = int(data.get("attempts", 0) or 0)
+            except (TypeError, ValueError):
+                attempts = 0
+                fixed = True
+            if attempts < 0:
+                attempts = 0
+                fixed = True
+            data["attempts"] = attempts
             if not data.get("created_at"):
                 data["created_at"] = now
                 fixed = True
@@ -405,6 +427,7 @@ def mark_records_running(records: list[QueueRecord], run_id: str) -> None:
         record.status = "running"
         record.last_run_id = run_id
         record.last_error = None
+        record.attempts += 1
         record.updated_at = now
 
 
@@ -489,6 +512,6 @@ def format_queue(records: list[QueueRecord]) -> str:
         name = record.file_name or record.url
         suffix = f" - {record.last_error}" if record.last_error and record.status == "failed" else ""
         lines.append(
-            f"  {record.status:<9} {record.queue_id} {name} {record.url}{suffix}"
+            f"  {record.status:<9} {record.queue_id} attempts={record.attempts} {name} {record.url}{suffix}"
         )
     return "\n".join(lines)

@@ -89,6 +89,27 @@ def test_legacy_queue_record_without_schema_version_loads_as_v1(tmp_path):
 
     assert record.schema_version == QUEUE_SCHEMA_VERSION
     assert record.queue_id == "q1"
+    assert record.attempts == 0
+
+
+def test_validate_queue_reports_invalid_attempts(tmp_path):
+    path = queue_path(str(tmp_path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "queue_id": "q1",
+                "url": "https://example.com/a.bin",
+                "attempts": "bad",
+            }
+        )
+        + "\n"
+    )
+
+    report = validate_queue(str(tmp_path))
+
+    assert report.invalid == 1
+    assert "invalid attempts" in format_queue_validation(report)
 
 
 def test_validate_queue_reports_bad_lines_and_duplicates(tmp_path):
@@ -136,18 +157,21 @@ def test_repair_queue_fixes_repairable_records_and_drops_unrepairable(tmp_path):
         + "\n"
         + json.dumps({"queue_id": "q4", "url": "https://example.com/d.bin", "status": "bad"})
         + "\n"
+        + json.dumps({"queue_id": "q5", "url": "https://example.com/e.bin", "attempts": "bad"})
+        + "\n"
     )
 
     stats = repair_queue(str(tmp_path))
     records = load_queue(str(tmp_path))
 
-    assert stats["kept"] == 3
+    assert stats["kept"] == 4
     assert stats["dropped_malformed"] == 1
     assert stats["dropped_invalid"] == 1
     assert stats["dropped_unsupported_schema"] == 1
-    assert stats["fixed"] == 3
-    assert len({record.queue_id for record in records}) == 3
-    assert records[-1].status == "failed"
+    assert stats["fixed"] == 4
+    assert len({record.queue_id for record in records}) == 4
+    assert records[-2].status == "failed"
+    assert records[-1].attempts == 0
     assert validate_queue(str(tmp_path)).ok
 
 
@@ -177,6 +201,24 @@ def test_recover_remove_and_clear_queue_records(tmp_path):
 def test_clear_queue_requires_status_or_all(tmp_path):
     with pytest.raises(ValueError):
         clear_queue(cache_dir=str(tmp_path))
+
+
+def test_mark_records_running_increments_attempts(tmp_path):
+    from pdman.queue import start_queue_records
+
+    records = [QueueRecord(queue_id="q1", url="https://example.com/a.bin")]
+    rewrite_queue(records, str(tmp_path))
+
+    selected = start_queue_records(
+        cache_dir=str(tmp_path),
+        status="pending",
+        limit=1,
+        run_id="run-1",
+    )
+
+    assert selected[0].status == "running"
+    assert selected[0].attempts == 1
+    assert load_queue(str(tmp_path))[0].attempts == 1
 
 
 def test_update_queue_from_results_completed_and_failed():
@@ -225,3 +267,4 @@ def test_format_queue_includes_status_and_error():
     assert "q1" in text
     assert "a.bin" in text
     assert "HTTP 503" in text
+    assert "attempts=0" in text
