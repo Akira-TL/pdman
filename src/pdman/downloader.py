@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .manager import Manager
 from .chunk import Chunk, STREAM_CHUNK_SIZE
 from .range_allocator import RangeAllocator, choose_dynamic_range_size
+from .range_metadata import DYNAMIC_RANGE_METADATA_FILENAME, write_range_metadata
 from .range_response import RangeResponseValidationError, validate_range_response
 from .range_task import RangeTask
 from .runtime import TmpSpaceInsufficient
@@ -858,6 +859,7 @@ class Downloader:
             try:
                 await self._download_range_task(task)
                 allocator.mark_completed(task)
+                await self._write_dynamic_metadata()
             except SlowRangeError as e:
                 child = allocator.split_remaining(
                     task, min_size=self.parent.min_split_size or 1
@@ -867,6 +869,7 @@ class Downloader:
                         f"Split slow dynamic range {task.start}-{task.end}; "
                         f"queued remaining range {child.start}-{child.end}: {e}"
                     )
+                    await self._write_dynamic_metadata()
                     continue
                 await self._retry_dynamic_range_after_failure(allocator, task, e)
             except Exception as e:
@@ -883,16 +886,33 @@ class Downloader:
             async with self.lock:
                 self.downloaded_bytes = max(0, self.downloaded_bytes - removed)
         if not allocator.mark_failed(task, str(error)):
+            await self._write_dynamic_metadata()
             raise error
         self._logger.debug(
             f"Requeued dynamic range {task.start}-{task.end} after failure: {error}"
         )
+        await self._write_dynamic_metadata()
         await asyncio.sleep(self.parent.retry_wait)
+
+    async def _write_dynamic_metadata(self) -> None:
+        if self.range_allocator is None or self.pdm_tmp is None:
+            return
+        metadata_path = Path(self.pdm_tmp) / DYNAMIC_RANGE_METADATA_FILENAME
+        try:
+            await asyncio.to_thread(
+                write_range_metadata,
+                metadata_path,
+                self.range_allocator,
+                file_size=self.file_size,
+            )
+        except Exception as e:
+            self._logger.warning(f"Failed to write dynamic range metadata: {e}")
 
     async def _start_dynamic_download(self) -> None:
         allocator = self._build_range_allocator()
         self.range_allocator = allocator
         self.downloaded_bytes = sum(task.existing_size() for task in allocator.ranges)
+        await self._write_dynamic_metadata()
         workers = []
 
         async def progress_run():
@@ -924,6 +944,7 @@ class Downloader:
         ]
         try:
             await asyncio.gather(*workers)
+            await self._write_dynamic_metadata()
             if allocator.has_failures:
                 failed = allocator.failed[0]
                 raise RuntimeError(
