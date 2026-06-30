@@ -8,7 +8,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import pdman.cli as cli
 from pdman.manager import Manager
+from pdman.queue import load_queue
 from pdman.status import TaskReason, TaskStatus
 
 PAYLOAD = (b"pdman-local-test-" * 8192) + b"end"
@@ -230,6 +232,86 @@ def test_system_tmp_space_insufficient_records_failed_result(monkeypatch, tmp_pa
             manager.runtime_paths.history_path.read_text().splitlines()[0]
         )
         assert history_record["reason_code"] == "tmp_space_insufficient"
+
+
+def test_queue_start_downloads_from_local_http_server(tmp_path):
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        download_dir = tmp_path / "downloads"
+        add_exit = cli.main(
+            [
+                "queue",
+                "add",
+                "--cache-dir",
+                str(cache_dir),
+                "-d",
+                str(download_dir),
+                "--file-name",
+                "queue.bin",
+                server.url("/slow.bin?delay=0.05"),
+            ]
+        )
+        start_exit = cli.main(
+            [
+                "queue",
+                "start",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "-N",
+                "1",
+                "-x",
+                "1",
+            ]
+        )
+
+        assert add_exit == 0
+        assert start_exit == 0
+        assert (download_dir / "queue.bin").read_bytes() == PAYLOAD
+        records = load_queue(str(cache_dir))
+        assert records[0].status == "completed"
+        assert records[0].last_run_id is not None
+        assert records[0].last_error == "download completed"
+
+
+def test_queue_start_records_failed_local_http_result(tmp_path):
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        download_dir = tmp_path / "downloads"
+        add_exit = cli.main(
+            [
+                "queue",
+                "add",
+                "--cache-dir",
+                str(cache_dir),
+                "-d",
+                str(download_dir),
+                "--file-name",
+                "failed.bin",
+                server.url("/status.bin?status=503"),
+            ]
+        )
+        start_exit = cli.main(
+            [
+                "queue",
+                "start",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "--retry",
+                "0",
+            ]
+        )
+
+        assert add_exit == 0
+        assert start_exit == 1
+        assert not (download_dir / "failed.bin").exists()
+        records = load_queue(str(cache_dir))
+        assert records[0].status == "failed"
+        assert records[0].last_run_id is not None
+        assert records[0].last_error == "HTTP 503 during header check"
 
 
 def test_slow_head_is_failed_after_connection_timeout(tmp_path):
