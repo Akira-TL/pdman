@@ -174,7 +174,9 @@ def update_queue_from_results(
         else:
             result = remaining_results.pop(result_index)
             record.status = _result_status(result)
-            record.last_error = result.reason or result.error
+            record.last_error = (
+                result.reason or result.error if record.status == "failed" else None
+            )
         record.last_run_id = run_id
         record.updated_at = now
     return records

@@ -85,6 +85,7 @@ def test_update_queue_from_results_completed_and_failed():
 
     assert [record.status for record in updated] == ["completed", "failed"]
     assert [record.last_run_id for record in updated] == ["run-1", "run-1"]
+    assert updated[0].last_error is None
     assert updated[1].last_error == "HTTP 503 during header check"
 
 

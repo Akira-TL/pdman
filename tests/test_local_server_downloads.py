@@ -272,7 +272,7 @@ def test_queue_start_downloads_from_local_http_server(tmp_path):
         records = load_queue(str(cache_dir))
         assert records[0].status == "completed"
         assert records[0].last_run_id is not None
-        assert records[0].last_error == "download completed"
+        assert records[0].last_error is None
 
 
 def test_queue_start_records_failed_local_http_result(tmp_path):
