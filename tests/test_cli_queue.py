@@ -32,6 +32,7 @@ def test_cli_queue_add_url_and_list(tmp_path, capsys):
     assert exit_code == 0
     assert "Queue:" in output
     assert "file.bin" in output
+    assert "attempts=0" in output
 
 
 def test_cli_queue_add_input_file(tmp_path):
@@ -81,6 +82,50 @@ def test_cli_queue_start_no_pending_returns_zero(tmp_path, capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "No queue records to start" in output
+
+
+def test_cli_queue_retry_failed_no_failed_returns_zero(tmp_path, capsys):
+    exit_code = cli.main(["queue", "retry-failed", "--cache-dir", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "No failed queue records to retry" in output
+
+
+def test_cli_queue_retry_failed_selects_failed_only_and_honors_limit(tmp_path):
+    cli.main(["queue", "add", "--cache-dir", str(tmp_path), "https://example.com/pending.bin"])
+    cli.main(["queue", "add", "--cache-dir", str(tmp_path), "http://127.0.0.1:1/fail-1.bin"])
+    cli.main(["queue", "add", "--cache-dir", str(tmp_path), "http://127.0.0.1:1/fail-2.bin"])
+    records = load_queue(str(tmp_path))
+    records[1].status = "failed"
+    records[1].last_error = "first failure"
+    records[2].status = "failed"
+    records[2].last_error = "second failure"
+    rewrite_queue(records, str(tmp_path))
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "retry-failed",
+            "--cache-dir",
+            str(tmp_path),
+            "--limit",
+            "1",
+            "--retry",
+            "0",
+        ]
+    )
+
+    records = load_queue(str(tmp_path))
+    assert exit_code == 1
+    assert records[0].status == "pending"
+    assert records[0].attempts == 0
+    assert records[1].status == "failed"
+    assert records[1].attempts == 1
+    assert records[1].last_error
+    assert records[2].status == "failed"
+    assert records[2].attempts == 0
+    assert records[2].last_error == "second failure"
 
 
 def test_cli_queue_validate_valid_and_invalid(tmp_path, capsys):

@@ -127,11 +127,9 @@ def handle_queue_list_command(argv=None) -> int:
     return 0
 
 
-def handle_queue_start_command(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="pdman queue start")
+def add_queue_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--status", choices=("pending", "failed"), default="pending")
     parser.add_argument("-N", "--max-downloads", type=int, default=4)
     parser.add_argument("-x", "--max-concurrent-downloads", type=int, default=5)
     parser.add_argument("--tmp", default=None)
@@ -139,8 +137,9 @@ def handle_queue_start_command(argv=None) -> int:
     parser.add_argument("--keep-tmp", action="store_true")
     parser.add_argument("--retry", type=int, default=3)
     parser.add_argument("--retry-wait", type=int, default=5)
-    args = parser.parse_args(argv)
 
+
+def run_queue_records(args, *, status: str, empty_message: str) -> int:
     manager = Manager(
         max_downloads=args.max_downloads,
         max_concurrent_downloads=args.max_concurrent_downloads,
@@ -153,12 +152,12 @@ def handle_queue_start_command(argv=None) -> int:
     )
     selected = start_queue_records(
         cache_dir=args.cache_dir,
-        status=args.status,
+        status=status,
         limit=args.limit,
         run_id=manager.run_id,
     )
     if not selected:
-        print("No queue records to start.")
+        print(empty_message)
         return 0
     for record in selected:
         manager.append(
@@ -175,6 +174,29 @@ def handle_queue_start_command(argv=None) -> int:
         run_id=manager.run_id,
     )
     return manager.exit_code
+
+
+def handle_queue_start_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue start")
+    add_queue_run_args(parser)
+    parser.add_argument("--status", choices=("pending", "failed"), default="pending")
+    args = parser.parse_args(argv)
+    return run_queue_records(
+        args,
+        status=args.status,
+        empty_message="No queue records to start.",
+    )
+
+
+def handle_queue_retry_failed_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman queue retry-failed")
+    add_queue_run_args(parser)
+    args = parser.parse_args(argv)
+    return run_queue_records(
+        args,
+        status="failed",
+        empty_message="No failed queue records to retry.",
+    )
 
 
 def handle_queue_validate_command(argv=None) -> int:
@@ -252,6 +274,8 @@ def handle_queue_command(argv=None) -> int:
         return handle_queue_list_command(rest)
     if command == "start":
         return handle_queue_start_command(rest)
+    if command == "retry-failed":
+        return handle_queue_retry_failed_command(rest)
     if command == "validate":
         return handle_queue_validate_command(rest)
     if command == "repair":
