@@ -257,10 +257,14 @@ pdman queue add -i tasks.yaml
 pdman queue add -d /data/downloads --file-name file.bin "https://example.com/file.bin"
 pdman queue list
 pdman queue list --status pending
+pdman queue list --status failed --attempts-ge 3
 pdman queue start
 pdman queue start --limit 5
 pdman queue retry-failed
 pdman queue retry-failed --limit 5
+pdman queue retry-failed --dry-run
+pdman queue retry-failed --max-attempts 3
+pdman queue retry-failed --error-contains "HTTP 503"
 pdman queue validate
 pdman queue repair
 pdman queue recover
@@ -273,11 +277,13 @@ pdman queue clear --all
 
 v0.4.5 开始，queue record 会记录 `attempts`。每次 `queue start` 或 `queue retry-failed` 真正取出任务执行时，`attempts` 会递增。`queue retry-failed` 会读取 failed 任务重新执行；成功后状态变成 `completed` 且 `last_error=None`，再次失败则保持 `failed` 并更新 `last_error`。
 
+v0.4.6 开始，queue record 会记录 `last_status_reason`，用于保存最近一次 completed/skipped/failed 的原因。`retry-failed --dry-run` 只预览候选，不修改 queue；`--max-attempts N` 只重试 `attempts < N` 的失败记录；`--error-contains TEXT` 只重试 `last_error` 包含指定文本的失败记录，匹配不区分大小写。
+
 v0.4.4 开始，queue record 会写入 `schema_version=1`，queue 写操作会使用 `~/.cache/pdman/queue.lock`。锁 backend 会按平台自动选择：Linux/macOS/BSD 使用 `fcntl`，Windows 使用 `msvcrt`，其他平台使用原子目录锁 fallback。
 
 维护命令用于检查、修复和清理 queue：`validate` 只报告问题，`repair` 会重写为可用 queue，`recover` 会把 stale `running` 任务恢复为 `pending`，`remove` 按 ID 删除，`clear` 按状态或 `--all` 清理。
 
-当前队列不提供自动 retry scheduler、max-attempts policy、backoff、优先级、daemon 和 SQLite，这些放到后续版本。
+当前队列不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon 和 SQLite，这些放到后续版本。
 
 ### 任务结果与退出码
 

@@ -334,10 +334,14 @@ pdman queue add -i tasks.yaml
 pdman queue add -d /data/downloads --file-name file.bin "https://example.com/file.bin"
 pdman queue list
 pdman queue list --status pending
+pdman queue list --status failed --attempts-ge 3
 pdman queue start
 pdman queue start --limit 5
 pdman queue retry-failed
 pdman queue retry-failed --limit 5
+pdman queue retry-failed --dry-run
+pdman queue retry-failed --max-attempts 3
+pdman queue retry-failed --error-contains "HTTP 503"
 pdman queue validate
 pdman queue repair
 pdman queue recover
@@ -361,6 +365,7 @@ queue record schema：
   "updated_at": "...",
   "last_run_id": null,
   "last_error": null,
+  "last_status_reason": null,
   "attempts": 0
 }
 ```
@@ -379,6 +384,17 @@ queue status：
 
 v0.4.5 增加 `attempts` 字段和 `queue retry-failed`。每次 queue record 被 `queue start` 或 `queue retry-failed` 取出执行时，`attempts += 1`。`retry-failed` 只选取 `failed` 记录，成功后写回 `completed` 且清空 `last_error`，失败后保持 `failed` 并更新 `last_error`。`queue start --status failed` 仍保留，但文档主推 `queue retry-failed`。
 
+v0.4.6 增加 retry policy 人工控制边界：
+
+| 参数/字段 | 行为 |
+| --- | --- |
+| `last_status_reason` | 保存最近一次 completed/skipped/failed 的原因，不污染 `last_error` |
+| `queue list --attempts-ge N` | 查询 attempts >= N 的记录 |
+| `queue list --attempts-lt N` | 查询 attempts < N 的记录 |
+| `retry-failed --dry-run` | 只预览候选，不修改 queue，不递增 attempts，不创建 Manager |
+| `retry-failed --max-attempts N` | 只重试 attempts < N 的 failed records |
+| `retry-failed --error-contains TEXT` | 只重试 `last_error` 包含 TEXT 的 failed records，大小写不敏感 |
+
 v0.4.4 加固内容：
 
 | 项目 | 行为 |
@@ -395,7 +411,7 @@ v0.4.4 加固内容：
 | `queue remove` | 按 queue_id 删除记录 |
 | `queue clear` | 按状态或 `--all` 清理记录 |
 
-限制：v0.4.5 不提供自动 retry scheduler、max-attempts policy、backoff、优先级、daemon、SQLite、网络文件系统强一致锁或 agent event stream。
+限制：v0.4.6 不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon、SQLite、网络文件系统强一致锁或 agent event stream。
 
 ---
 
