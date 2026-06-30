@@ -275,6 +275,8 @@ v0.6.6 补齐 history 可见性：runtime history JSONL 稳定写入 `resume_rej
 
 v0.6.7 新增内部 JSON payload helper：`resume_rejection_payload(...)` 可从 `TaskResult` 或 history record 生成 `{present, code, reason}` 结构。它只暴露最小诊断字段，不输出完整 resume metadata、本地 partial 路径或 dynamic debug ranges；该版本不新增 CLI 参数，也不改变恢复行为。
 
+v0.6.8 为 `pdman history` 增加 `--json` / `--jsonl`，输出 records/count，并在每条 history record 中包含 `resume_rejection` payload。该版本只扩展 history 输出，不扩展 `pdman run`、queue 或 debug ranges，也不暴露完整 resume metadata。
+
 ---
 
 ## 6. 回调命令
