@@ -197,6 +197,8 @@ v0.5.2 起，dynamic range worker 会记录每个 range 的 `downloaded_bytes`�
 
 v0.5.3 起，`SlowRangeError` 会优先尝试 split remaining：已下载的 partial bytes 会重命名为较短的 completed range，剩余区间会作为 child range 插回 pending 队列继续下载。普通网络错误仍保持 v0.5.2 的删除 partial 后 retry 语义。
 
+v0.5.4 起，dynamic mode 会校验 Range 响应：`206` 必须包含 `Content-Range`，且 start/end 必须匹配请求区间；total 如果不是 `*`，必须等于已知文件大小。`200` 只允许用于 full-file range；partial range 收到 `200`、缺失或不匹配的 `Content-Range`、短 body 都会作为 range failure 处理，并进入已有 retry / failed 流程。
+
 v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
 ---
