@@ -64,7 +64,11 @@ def write_resume_metadata(path: str | Path, payload: dict[str, Any]) -> None:
 def validate_resume_metadata(
     payload: dict[str, Any],
     *,
+    expected_url: str | None = None,
+    expected_target_path: str | Path | None = None,
     expected_file_size: int | None = None,
+    expected_etag: str | None = None,
+    expected_last_modified: str | None = None,
     expected_segments: list[dict[str, Any]] | None = None,
     inspect_partials: bool = False,
 ) -> None:
@@ -82,10 +86,40 @@ def validate_resume_metadata(
     if mode not in RESUME_METADATA_MODES:
         raise ResumeMetadataError("Unsupported resume metadata mode: " f"{mode!r}")
 
+    url = _require_str(payload, "url")
+    _require_str(payload, "filename")
+    target_path = _require_str(payload, "target_path")
+    if expected_url is not None and url != expected_url:
+        raise ResumeMetadataError(
+            "url mismatch: " f"metadata={url!r} expected={expected_url!r}"
+        )
+    if expected_target_path is not None and target_path != str(expected_target_path):
+        raise ResumeMetadataError(
+            "target_path mismatch: "
+            f"metadata={target_path!r} expected={str(expected_target_path)!r}"
+        )
+
     file_size = _require_int(payload, "file_size", minimum=0)
     if expected_file_size is not None and file_size != expected_file_size:
         raise ResumeMetadataError(
             "file_size mismatch: " f"metadata={file_size} expected={expected_file_size}"
+        )
+
+    etag = payload.get("etag")
+    if etag is not None and not isinstance(etag, str):
+        raise ResumeMetadataError("etag must be a string or null")
+    if expected_etag is not None and etag != expected_etag:
+        raise ResumeMetadataError(
+            "etag mismatch: " f"metadata={etag!r} expected={expected_etag!r}"
+        )
+
+    last_modified = payload.get("last_modified")
+    if last_modified is not None and not isinstance(last_modified, str):
+        raise ResumeMetadataError("last_modified must be a string or null")
+    if expected_last_modified is not None and last_modified != expected_last_modified:
+        raise ResumeMetadataError(
+            "last_modified mismatch: "
+            f"metadata={last_modified!r} expected={expected_last_modified!r}"
         )
 
     segments = payload.get("segments")
