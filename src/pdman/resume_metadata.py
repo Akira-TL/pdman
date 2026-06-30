@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +14,39 @@ RESUME_METADATA_MODES = {"static", "dynamic"}
 RESUME_SEGMENT_STATES = {"completed", "partial", "pending", "failed"}
 
 
+class ResumeRejectionCode(StrEnum):
+    UNKNOWN = "unknown"
+    METADATA_MISSING = "metadata_missing"
+    METADATA_JSON_INVALID = "metadata_json_invalid"
+    METADATA_OBJECT_INVALID = "metadata_object_invalid"
+    SCHEMA_VERSION_UNSUPPORTED = "schema_version_unsupported"
+    KIND_MISMATCH = "kind_mismatch"
+    MODE_UNSUPPORTED = "mode_unsupported"
+    URL_MISMATCH = "url_mismatch"
+    TARGET_PATH_MISMATCH = "target_path_mismatch"
+    FILE_SIZE_MISMATCH = "file_size_mismatch"
+    ETAG_MISMATCH = "etag_mismatch"
+    LAST_MODIFIED_MISMATCH = "last_modified_mismatch"
+    FIELD_INVALID = "field_invalid"
+    SEGMENT_INVALID = "segment_invalid"
+    SEGMENT_LAYOUT_MISMATCH = "segment_layout_mismatch"
+    PARTIAL_TOO_LARGE = "partial_too_large"
+
+
 class ResumeMetadataError(ValueError):
     """Raised when resume metadata v2 is invalid or unsafe to reuse."""
+
+    def __init__(
+        self,
+        message: str,
+        reason_code: ResumeRejectionCode = ResumeRejectionCode.UNKNOWN,
+    ):
+        self.reason_code = reason_code
+        super().__init__(message)
+
+
+def format_resume_rejection(error: ResumeMetadataError) -> str:
+    return f"Resume rejected [{error.reason_code.value}]: {error}"
 
 
 def load_resume_metadata(path: str | Path) -> dict[str, Any]:
@@ -23,18 +55,23 @@ def load_resume_metadata(path: str | Path) -> dict[str, Any]:
         raw = metadata_path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ResumeMetadataError(
-            f"Unable to read resume metadata file: {metadata_path}"
+            f"Unable to read resume metadata file: {metadata_path}",
+            ResumeRejectionCode.METADATA_MISSING,
         ) from exc
 
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ResumeMetadataError(
-            f"Invalid JSON resume metadata file: {metadata_path}"
+            f"Invalid JSON resume metadata file: {metadata_path}",
+            ResumeRejectionCode.METADATA_JSON_INVALID,
         ) from exc
 
     if not isinstance(payload, dict):
-        raise ResumeMetadataError("Resume metadata must be a JSON object")
+        raise ResumeMetadataError(
+            "Resume metadata must be a JSON object",
+            ResumeRejectionCode.METADATA_OBJECT_INVALID,
+        )
     validate_resume_metadata(payload)
     return payload
 
@@ -76,58 +113,82 @@ def validate_resume_metadata(
     schema_version = payload.get("schema_version")
     if schema_version != RESUME_METADATA_SCHEMA_VERSION:
         raise ResumeMetadataError(
-            "Unsupported resume metadata schema_version: " f"{schema_version!r}"
+            "Unsupported resume metadata schema_version: " f"{schema_version!r}",
+            ResumeRejectionCode.SCHEMA_VERSION_UNSUPPORTED,
         )
 
     kind = payload.get("kind")
     if kind != RESUME_METADATA_KIND:
-        raise ResumeMetadataError("Unsupported resume metadata kind: " f"{kind!r}")
+        raise ResumeMetadataError(
+            "Unsupported resume metadata kind: " f"{kind!r}",
+            ResumeRejectionCode.KIND_MISMATCH,
+        )
 
     mode = payload.get("mode")
     if mode not in RESUME_METADATA_MODES:
-        raise ResumeMetadataError("Unsupported resume metadata mode: " f"{mode!r}")
+        raise ResumeMetadataError(
+            "Unsupported resume metadata mode: " f"{mode!r}",
+            ResumeRejectionCode.MODE_UNSUPPORTED,
+        )
 
     url = _require_str(payload, "url")
     _require_str(payload, "filename")
     target_path = _require_str(payload, "target_path")
     if expected_url is not None and url != expected_url:
         raise ResumeMetadataError(
-            "url mismatch: " f"metadata={url!r} expected={expected_url!r}"
+            "url mismatch: " f"metadata={url!r} expected={expected_url!r}",
+            ResumeRejectionCode.URL_MISMATCH,
         )
     if expected_target_path is not None and target_path != str(expected_target_path):
         raise ResumeMetadataError(
             "target_path mismatch: "
-            f"metadata={target_path!r} expected={str(expected_target_path)!r}"
+            f"metadata={target_path!r} expected={str(expected_target_path)!r}",
+            ResumeRejectionCode.TARGET_PATH_MISMATCH,
         )
 
     file_size = _require_int(payload, "file_size", minimum=0)
     if expected_file_size is not None and file_size != expected_file_size:
         raise ResumeMetadataError(
-            "file_size mismatch: " f"metadata={file_size} expected={expected_file_size}"
+            "file_size mismatch: " f"metadata={file_size} expected={expected_file_size}",
+            ResumeRejectionCode.FILE_SIZE_MISMATCH,
         )
 
     etag = payload.get("etag")
     if etag is not None and not isinstance(etag, str):
-        raise ResumeMetadataError("etag must be a string or null")
+        raise ResumeMetadataError(
+            "etag must be a string or null",
+            ResumeRejectionCode.FIELD_INVALID,
+        )
     if expected_etag is not None and etag != expected_etag:
         raise ResumeMetadataError(
-            "etag mismatch: " f"metadata={etag!r} expected={expected_etag!r}"
+            "etag mismatch: " f"metadata={etag!r} expected={expected_etag!r}",
+            ResumeRejectionCode.ETAG_MISMATCH,
         )
 
     last_modified = payload.get("last_modified")
     if last_modified is not None and not isinstance(last_modified, str):
-        raise ResumeMetadataError("last_modified must be a string or null")
+        raise ResumeMetadataError(
+            "last_modified must be a string or null",
+            ResumeRejectionCode.FIELD_INVALID,
+        )
     if expected_last_modified is not None and last_modified != expected_last_modified:
         raise ResumeMetadataError(
             "last_modified mismatch: "
-            f"metadata={last_modified!r} expected={expected_last_modified!r}"
+            f"metadata={last_modified!r} expected={expected_last_modified!r}",
+            ResumeRejectionCode.LAST_MODIFIED_MISMATCH,
         )
 
     segments = payload.get("segments")
     if not isinstance(segments, list):
-        raise ResumeMetadataError("Resume metadata must include segments as a list")
+        raise ResumeMetadataError(
+            "Resume metadata must include segments as a list",
+            ResumeRejectionCode.SEGMENT_INVALID,
+        )
     if not segments:
-        raise ResumeMetadataError("Resume metadata segments must not be empty")
+        raise ResumeMetadataError(
+            "Resume metadata segments must not be empty",
+            ResumeRejectionCode.SEGMENT_INVALID,
+        )
 
     normalized_segments = [_validate_segment(item, index) for index, item in enumerate(segments)]
     _validate_segment_order(normalized_segments)
@@ -142,7 +203,8 @@ def validate_resume_metadata(
                 raise ResumeMetadataError(
                     "segment partial larger than expected: "
                     f"index={segment['index']} existing_size={segment['existing_size']} "
-                    f"expected_size={segment['expected_size']}"
+                    f"expected_size={segment['expected_size']}",
+                    ResumeRejectionCode.PARTIAL_TOO_LARGE,
                 )
 
 
@@ -336,29 +398,42 @@ def _require_int(
 ) -> int:
     value = payload.get(key)
     if not isinstance(value, int):
-        raise ResumeMetadataError(f"{key} must be an integer")
+        raise ResumeMetadataError(
+            f"{key} must be an integer",
+            ResumeRejectionCode.FIELD_INVALID,
+        )
     if minimum is not None and value < minimum:
-        raise ResumeMetadataError(f"{key} must be >= {minimum}")
+        raise ResumeMetadataError(
+            f"{key} must be >= {minimum}",
+            ResumeRejectionCode.FIELD_INVALID,
+        )
     return value
 
 
 def _require_str(payload: dict[str, Any], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value:
-        raise ResumeMetadataError(f"{key} must be a non-empty string")
+        raise ResumeMetadataError(
+            f"{key} must be a non-empty string",
+            ResumeRejectionCode.FIELD_INVALID,
+        )
     return value
 
 
 def _validate_segment(segment: Any, ordinal: int) -> dict[str, Any]:
     if not isinstance(segment, dict):
-        raise ResumeMetadataError(f"segment {ordinal} must be an object")
+        raise ResumeMetadataError(
+            f"segment {ordinal} must be an object",
+            ResumeRejectionCode.SEGMENT_INVALID,
+        )
 
     index = _require_int(segment, "index", minimum=0)
     start = _require_int(segment, "start", minimum=0)
     end = _require_int(segment, "end", minimum=0)
     if end < start:
         raise ResumeMetadataError(
-            f"segment {index} end must be greater than or equal to start"
+            f"segment {index} end must be greater than or equal to start",
+            ResumeRejectionCode.SEGMENT_INVALID,
         )
 
     path = _require_str(segment, "path")
@@ -367,20 +442,23 @@ def _validate_segment(segment: Any, ordinal: int) -> dict[str, Any]:
     if expected_size != actual_expected_size:
         raise ResumeMetadataError(
             "segment expected_size mismatch: "
-            f"index={index} metadata={expected_size} expected={actual_expected_size}"
+            f"index={index} metadata={expected_size} expected={actual_expected_size}",
+            ResumeRejectionCode.SEGMENT_INVALID,
         )
 
     existing_size = _require_int(segment, "existing_size", minimum=0)
     if existing_size > expected_size:
         raise ResumeMetadataError(
             "segment partial larger than expected: "
-            f"index={index} existing_size={existing_size} expected_size={expected_size}"
+            f"index={index} existing_size={existing_size} expected_size={expected_size}",
+            ResumeRejectionCode.PARTIAL_TOO_LARGE,
         )
 
     state = segment.get("state")
     if state not in RESUME_SEGMENT_STATES:
         raise ResumeMetadataError(
-            "Unsupported resume segment state: " f"index={index} state={state!r}"
+            "Unsupported resume segment state: " f"index={index} state={state!r}",
+            ResumeRejectionCode.SEGMENT_INVALID,
         )
 
     return {
@@ -400,16 +478,21 @@ def _validate_segment_order(segments: list[dict[str, Any]]) -> None:
     for ordinal, segment in enumerate(segments):
         index = segment["index"]
         if index in seen_indexes:
-            raise ResumeMetadataError(f"duplicate segment index: {index}")
+            raise ResumeMetadataError(
+                f"duplicate segment index: {index}",
+                ResumeRejectionCode.SEGMENT_LAYOUT_MISMATCH,
+            )
         seen_indexes.add(index)
         if index != ordinal:
             raise ResumeMetadataError(
-                f"segment index mismatch: ordinal={ordinal} index={index}"
+                f"segment index mismatch: ordinal={ordinal} index={index}",
+                ResumeRejectionCode.SEGMENT_LAYOUT_MISMATCH,
             )
         if segment["start"] != previous_end + 1:
             raise ResumeMetadataError(
                 "segment layout mismatch: "
-                f"index={index} start={segment['start']} expected={previous_end + 1}"
+                f"index={index} start={segment['start']} expected={previous_end + 1}",
+                ResumeRejectionCode.SEGMENT_LAYOUT_MISMATCH,
             )
         previous_end = segment["end"]
 
@@ -422,7 +505,8 @@ def _validate_file_size_coverage(
     actual_end = segments[-1]["end"]
     if actual_end != expected_end:
         raise ResumeMetadataError(
-            "segment layout mismatch: " f"last_end={actual_end} expected={expected_end}"
+            "segment layout mismatch: " f"last_end={actual_end} expected={expected_end}",
+            ResumeRejectionCode.SEGMENT_LAYOUT_MISMATCH,
         )
 
 
@@ -433,7 +517,8 @@ def _validate_expected_layout(
     if len(segments) != len(expected_segments):
         raise ResumeMetadataError(
             "segment layout mismatch: "
-            f"metadata_count={len(segments)} expected_count={len(expected_segments)}"
+            f"metadata_count={len(segments)} expected_count={len(expected_segments)}",
+            ResumeRejectionCode.SEGMENT_LAYOUT_MISMATCH,
         )
 
     for ordinal, (segment, expected) in enumerate(zip(segments, expected_segments)):
@@ -451,5 +536,6 @@ def _validate_expected_layout(
         ):
             raise ResumeMetadataError(
                 "segment layout mismatch: "
-                f"index={segment['index']} expected_index={expected_index}"
+                f"index={segment['index']} expected_index={expected_index}",
+                ResumeRejectionCode.SEGMENT_LAYOUT_MISMATCH,
             )
