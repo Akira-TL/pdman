@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +11,34 @@ from .status import TaskResult, TaskStatus
 from .task_input import TaskInput
 
 
+QUEUE_SCHEMA_VERSION = 1
 QUEUE_STATUSES = {"pending", "running", "completed", "skipped", "failed"}
+
+
+class UnsupportedQueueSchema(ValueError):
+    pass
+
+
+@dataclass
+class QueueValidationIssue:
+    line_no: int | None
+    issue_type: str
+    message: str
+    queue_id: str | None = None
+
+
+@dataclass
+class QueueValidationReport:
+    valid: int = 0
+    malformed: int = 0
+    invalid: int = 0
+    duplicate_ids: int = 0
+    unsupported_schema: int = 0
+    issues: list[QueueValidationIssue] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.issues
 
 
 @dataclass
@@ -26,8 +53,17 @@ class QueueRecord:
     updated_at: str | None = None
     last_run_id: str | None = None
     last_error: str | None = None
+    schema_version: int = QUEUE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        if self.schema_version != QUEUE_SCHEMA_VERSION:
+            raise UnsupportedQueueSchema(
+                f"Unsupported queue schema version: {self.schema_version}"
+            )
+        if not self.queue_id:
+            raise ValueError("queue_id is required")
+        if not self.url:
+            raise ValueError("url is required")
         if self.status not in QUEUE_STATUSES:
             raise ValueError(f"Invalid queue status: {self.status}")
         now = utc_now_iso()
@@ -38,9 +74,11 @@ class QueueRecord:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "QueueRecord":
+        schema_version = int(data.get("schema_version", QUEUE_SCHEMA_VERSION))
         return cls(
-            queue_id=str(data["queue_id"]),
-            url=str(data["url"]),
+            schema_version=schema_version,
+            queue_id=str(data.get("queue_id") or ""),
+            url=str(data.get("url") or ""),
             file_name=data.get("file_name"),
             dir_path=data.get("dir_path"),
             md5=data.get("md5"),
@@ -65,22 +103,29 @@ def queue_path(cache_dir: str | None = None) -> Path:
     return root / "queue.jsonl"
 
 
-def load_queue(cache_dir: str | None = None) -> list[QueueRecord]:
-    path = queue_path(cache_dir)
+def queue_lock_path(cache_dir: str | None = None) -> Path:
+    root = Path(cache_dir).expanduser() if cache_dir else default_cache_root()
+    return root / "queue.lock"
+
+
+def _read_jsonl(path: Path) -> list[tuple[int, str]]:
     if not path.exists():
         return []
-    records: list[QueueRecord] = []
     with path.open("r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                if isinstance(data, dict):
-                    records.append(QueueRecord.from_dict(data))
-            except (json.JSONDecodeError, KeyError, ValueError, TypeError):
-                continue
+        return [(line_no, line.strip()) for line_no, line in enumerate(f, start=1)]
+
+
+def load_queue(cache_dir: str | None = None) -> list[QueueRecord]:
+    records: list[QueueRecord] = []
+    for _, line in _read_jsonl(queue_path(cache_dir)):
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+            if isinstance(data, dict):
+                records.append(QueueRecord.from_dict(data))
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            continue
     return records
 
 
@@ -118,6 +163,206 @@ def query_queue(
     if last is not None and last > 0:
         records = records[-last:]
     return records
+
+
+def _issue(
+    report: QueueValidationReport,
+    line_no: int | None,
+    issue_type: str,
+    message: str,
+    queue_id: str | None = None,
+) -> None:
+    report.issues.append(
+        QueueValidationIssue(
+            line_no=line_no,
+            issue_type=issue_type,
+            message=message,
+            queue_id=queue_id,
+        )
+    )
+    if issue_type == "malformed":
+        report.malformed += 1
+    elif issue_type == "duplicate_id":
+        report.duplicate_ids += 1
+    elif issue_type == "unsupported_schema":
+        report.unsupported_schema += 1
+    else:
+        report.invalid += 1
+
+
+def validate_queue(cache_dir: str | None = None) -> QueueValidationReport:
+    report = QueueValidationReport()
+    seen_ids: set[str] = set()
+    for line_no, line in _read_jsonl(queue_path(cache_dir)):
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError as e:
+            _issue(report, line_no, "malformed", f"malformed JSON: {e}")
+            continue
+        if not isinstance(data, dict):
+            _issue(report, line_no, "invalid", "queue record must be an object")
+            continue
+        queue_id = str(data.get("queue_id") or "")
+        schema_version = data.get("schema_version", QUEUE_SCHEMA_VERSION)
+        try:
+            schema_version = int(schema_version)
+        except (TypeError, ValueError):
+            _issue(report, line_no, "invalid", "schema_version must be an integer", queue_id)
+            continue
+        if schema_version > QUEUE_SCHEMA_VERSION:
+            _issue(
+                report,
+                line_no,
+                "unsupported_schema",
+                f"unsupported schema_version: {schema_version}",
+                queue_id or None,
+            )
+            continue
+        if not queue_id:
+            _issue(report, line_no, "invalid", "missing queue_id")
+            continue
+        if queue_id in seen_ids:
+            _issue(report, line_no, "duplicate_id", "duplicate queue_id", queue_id)
+            continue
+        if not data.get("url"):
+            _issue(report, line_no, "invalid", "missing url", queue_id)
+            continue
+        if data.get("status", "pending") not in QUEUE_STATUSES:
+            _issue(report, line_no, "invalid", "invalid status", queue_id)
+            continue
+        seen_ids.add(queue_id)
+        report.valid += 1
+    return report
+
+
+def format_queue_validation(report: QueueValidationReport) -> str:
+    lines = [
+        "Queue validation:",
+        f"  valid: {report.valid}",
+        f"  malformed: {report.malformed}",
+        f"  invalid: {report.invalid}",
+        f"  duplicate_ids: {report.duplicate_ids}",
+        f"  unsupported_schema: {report.unsupported_schema}",
+    ]
+    for issue in report.issues:
+        location = f"line {issue.line_no}" if issue.line_no is not None else "queue"
+        queue_id = f" ({issue.queue_id})" if issue.queue_id else ""
+        lines.append(f"  - {location}{queue_id}: {issue.message}")
+    return "\n".join(lines)
+
+
+def repair_queue(cache_dir: str | None = None) -> dict[str, int]:
+    path = queue_path(cache_dir)
+    seen_ids: set[str] = set()
+    repaired: list[QueueRecord] = []
+    stats = {
+        "kept": 0,
+        "dropped_malformed": 0,
+        "dropped_invalid": 0,
+        "dropped_unsupported_schema": 0,
+        "fixed": 0,
+    }
+    now = utc_now_iso()
+    for _, line in _read_jsonl(path):
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            stats["dropped_malformed"] += 1
+            continue
+        if not isinstance(data, dict):
+            stats["dropped_invalid"] += 1
+            continue
+        fixed = False
+        schema_version = data.get("schema_version", QUEUE_SCHEMA_VERSION)
+        try:
+            schema_version = int(schema_version)
+        except (TypeError, ValueError):
+            schema_version = QUEUE_SCHEMA_VERSION
+            fixed = True
+        if schema_version > QUEUE_SCHEMA_VERSION:
+            stats["dropped_unsupported_schema"] += 1
+            continue
+        data["schema_version"] = QUEUE_SCHEMA_VERSION
+        queue_id = str(data.get("queue_id") or "")
+        if not queue_id or queue_id in seen_ids:
+            data["queue_id"] = new_queue_id()
+            fixed = True
+        if not data.get("url"):
+            stats["dropped_invalid"] += 1
+            continue
+        if data.get("status", "pending") not in QUEUE_STATUSES:
+            data["status"] = "failed"
+            data["last_error"] = "repaired invalid queue status"
+            fixed = True
+        if not data.get("created_at"):
+            data["created_at"] = now
+            fixed = True
+        if not data.get("updated_at"):
+            data["updated_at"] = data["created_at"]
+            fixed = True
+        try:
+            record = QueueRecord.from_dict(data)
+        except (ValueError, TypeError):
+            stats["dropped_invalid"] += 1
+            continue
+        seen_ids.add(record.queue_id)
+        repaired.append(record)
+        stats["kept"] += 1
+        if fixed:
+            stats["fixed"] += 1
+    rewrite_queue(repaired, cache_dir)
+    return stats
+
+
+def recover_running(cache_dir: str | None = None) -> int:
+    records = load_queue(cache_dir)
+    recovered = 0
+    now = utc_now_iso()
+    for record in records:
+        if record.status == "running":
+            record.status = "pending"
+            record.last_error = "recovered from stale running state"
+            record.updated_at = now
+            recovered += 1
+    if recovered:
+        rewrite_queue(records, cache_dir)
+    return recovered
+
+
+def remove_queue_records(queue_ids: list[str], cache_dir: str | None = None) -> int:
+    wanted = set(queue_ids)
+    records = load_queue(cache_dir)
+    kept = [record for record in records if record.queue_id not in wanted]
+    removed = len(records) - len(kept)
+    if removed:
+        rewrite_queue(kept, cache_dir)
+    return removed
+
+
+def clear_queue(
+    *,
+    status: str | None = None,
+    all_records: bool = False,
+    cache_dir: str | None = None,
+) -> int:
+    if not all_records and status is None:
+        raise ValueError("clear_queue requires status or all_records=True")
+    if status is not None and status not in QUEUE_STATUSES:
+        raise ValueError(f"Invalid queue status: {status}")
+    records = load_queue(cache_dir)
+    if all_records:
+        cleared = len(records)
+        kept: list[QueueRecord] = []
+    else:
+        kept = [record for record in records if record.status != status]
+        cleared = len(records) - len(kept)
+    if cleared:
+        rewrite_queue(kept, cache_dir)
+    return cleared
 
 
 def task_to_queue_record(task: TaskInput) -> QueueRecord:
