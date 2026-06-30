@@ -259,7 +259,9 @@ resume metadata v2 的基础结构如下：
 
 v0.6.0 只提供 metadata 层能力：`write_resume_metadata`、`load_resume_metadata`、`validate_resume_metadata` 和 `inspect_resume_segments`。校验会拒绝不支持的 `schema_version`、错误的 `kind`、不支持的 `mode`、缺失或非法的 segment、文件大小不匹配、segment layout 不匹配，以及 JSON 或磁盘上的 partial 文件大于 `expected_size` 的情况。`inspect_resume_segments` 会只读检查 partial 路径，缺失文件记为 `existing_size=0` / `pending`，大小等于期望记为 `completed`，介于两者之间记为 `partial`。
 
-v0.6.0 不自动恢复下载，不修复 corrupted partial，不做 URL refresh，不做 HEAD fallback GET，也不把该 metadata 接入 CLI resume 流程。后续 v0.6.1 / v0.6.2 再分别把该 contract 接入 static resume 和 dynamic recovery。
+v0.6.0 不自动恢复下载，不修复 corrupted partial，不做 URL refresh，不做 HEAD fallback GET，也不把该 metadata 接入 CLI resume 流程。
+
+v0.6.1 将该 contract 接入 static `--continue` 路径：static 下载会在任务 tmp 目录写入 `resume-metadata.json`，记录当前 chunk layout 和 partial size。继续下载时，如果该文件存在，pdman 会优先使用它重建 chunk 链，并严格校验 URL、target path、file size、etag、last-modified、segment layout 和磁盘 partial size。校验失败时会清理旧 tmp 并重新开始，避免错误复用旧 partial。缺失 `resume-metadata.json` 时仍保留 legacy `.pdm` fallback，用于兼容旧 tmp。dynamic recovery 仍放在后续 v0.6.x。
 
 ---
 

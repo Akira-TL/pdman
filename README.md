@@ -163,6 +163,8 @@ pdman debug ranges --latest --search-root /path/to/tmp --jsonl
 
 v0.6.0 开始新增独立的 resume metadata v2 模型，用于后续严格恢复下载。它和 `dynamic-ranges.json` debug metadata 分离，字段包含 `schema_version=2`、`kind=resume`、`mode=static|dynamic`、URL、目标文件信息、file size、etag / last modified 以及 segments。当前版本只提供 metadata 读写、schema / layout 校验和 partial 文件大小检查；不会自动恢复下载，也不会修复 corrupted partial。static resume 接入和 dynamic recovery 会放到后续 v0.6.x。
 
+v0.6.1 起，static 下载路径会在任务 tmp 目录写入 `resume-metadata.json`。使用 `--continue` 时，pdman 会优先读取该 metadata，并在复用 partial 前校验 URL、target path、file size、etag / last-modified、segment layout 和磁盘 partial size；校验失败会丢弃旧 tmp，避免错误复用 stale partial。dynamic recovery 仍未启用。
+
 ### 重试与超时
 
 ```bash
