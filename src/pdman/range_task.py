@@ -28,6 +28,17 @@ class RangeTask:
     def is_complete(self) -> bool:
         return self.existing_size() == self.expected_size
 
+    @property
+    def next_start(self) -> int:
+        return min(self.start + self.existing_size(), self.end + 1)
+
+    @property
+    def remaining_size(self) -> int:
+        return max(0, self.end - self.next_start + 1)
+
+    def can_split(self, min_size: int) -> bool:
+        return self.existing_size() > 0 and self.remaining_size > min_size
+
     def discard_partial(self) -> int:
         removed = self.path.stat().st_size if self.path.exists() else 0
         if self.path.exists():

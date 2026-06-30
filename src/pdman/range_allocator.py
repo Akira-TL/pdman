@@ -57,19 +57,31 @@ class RangeAllocator:
         self.tmp_dir = Path(tmp_dir)
         self.filename = filename
         self.max_retries = max_retries
+        self._next_index = 0
         self.ranges = self._build_ranges()
         self._pending = deque(self.ranges)
         self._active: dict[int, RangeTask] = {}
         self.completed: list[RangeTask] = []
         self.failed: list[RangeTask] = []
         self.requeue_count = 0
+        self.split_count = 0
+
+    def _range_path(self, start: int, end: int) -> Path:
+        return self.tmp_dir / f"{self.filename}.range.{start}-{end}"
 
     def _build_ranges(self) -> list[RangeTask]:
         ranges: list[RangeTask] = []
         for index, start in enumerate(range(0, self.file_size, self.range_size)):
             end = min(start + self.range_size - 1, self.file_size - 1)
-            path = self.tmp_dir / f"{self.filename}.range.{start}-{end}"
-            ranges.append(RangeTask(index=index, start=start, end=end, path=path))
+            ranges.append(
+                RangeTask(
+                    index=index,
+                    start=start,
+                    end=end,
+                    path=self._range_path(start, end),
+                )
+            )
+        self._next_index = len(ranges)
         return ranges
 
     def claim_next(self) -> RangeTask | None:
@@ -98,6 +110,37 @@ class RangeAllocator:
         if task not in self.failed:
             self.failed.append(task)
         return False
+
+    def split_remaining(self, task: RangeTask, *, min_size: int) -> RangeTask | None:
+        if min_size <= 0:
+            raise ValueError("min_size must be positive")
+        existing_size = task.existing_size()
+        if not task.can_split(min_size):
+            return None
+        old_end = task.end
+        partial_end = task.start + existing_size - 1
+        child_start = partial_end + 1
+        child_path = self._range_path(child_start, old_end)
+        task.end = partial_end
+        new_task_path = self._range_path(task.start, task.end)
+        if task.path != new_task_path:
+            task.path.replace(new_task_path)
+            task.path = new_task_path
+        task.downloaded_bytes = existing_size
+        self._active.pop(task.index, None)
+        if task not in self.completed:
+            self.completed.append(task)
+        child = RangeTask(
+            index=self._next_index,
+            start=child_start,
+            end=old_end,
+            path=child_path,
+        )
+        self._next_index += 1
+        self.ranges.append(child)
+        self._pending.appendleft(child)
+        self.split_count += 1
+        return child
 
     @property
     def total_ranges(self) -> int:
