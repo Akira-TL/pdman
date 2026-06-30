@@ -727,6 +727,9 @@ class Downloader:
             self._logger.warning("Failed to read .pdm file, discarding temp files")
             self._reset_tmp_with_pdm_info()
             return None
+        self._logger.warning(
+            "Legacy .pdm resume fallback in use; resume-metadata.json is missing"
+        )
         file_list = {
             p.removeprefix(os.path.join(self.pdm_tmp, self.filename) + "."): p
             for p in glob(os.path.join(self.pdm_tmp, self.filename) + "*")
