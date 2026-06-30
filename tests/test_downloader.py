@@ -7,14 +7,19 @@ from pdman.status import TaskReason, TaskStatus
 
 
 def test_downloader_dynamic_segment_support_checks(tmp_path):
-    manager = Manager(segment_mode="dynamic", log_path=None)
+    manager = Manager(
+        segment_mode="dynamic",
+        max_concurrent_downloads=2,
+        min_split_size="1K",
+        log_path=None,
+    )
     downloader = Downloader(
         manager,
         "https://example.com/file.bin",
         str(tmp_path),
         filename="file.bin",
     )
-    downloader.file_size = 1024
+    downloader.file_size = 4096
     downloader.header_info = {"Accept-Ranges": "bytes"}
 
     assert downloader._can_use_dynamic_segments() is True
@@ -26,9 +31,62 @@ def test_downloader_dynamic_segment_support_checks(tmp_path):
     downloader.file_size = -1
     assert downloader._can_use_dynamic_segments() is False
 
-    downloader.file_size = 1024
+    downloader.file_size = 4096
     manager.continue_download = True
     assert downloader._can_use_dynamic_segments() is False
+
+
+def make_decision_downloader(tmp_path, **manager_kwargs):
+    defaults = {
+        "segment_mode": "auto",
+        "max_concurrent_downloads": 2,
+        "min_split_size": "1K",
+        "log_path": None,
+    }
+    defaults.update(manager_kwargs)
+    manager = Manager(**defaults)
+    downloader = Downloader(
+        manager,
+        "https://example.com/file.bin",
+        str(tmp_path),
+        filename="file.bin",
+    )
+    downloader.file_size = 4096
+    downloader.header_info = {"Accept-Ranges": "bytes"}
+    return downloader
+
+
+def test_auto_segment_mode_uses_dynamic_when_eligible(tmp_path):
+    downloader = make_decision_downloader(tmp_path)
+
+    decision = downloader._dynamic_segment_decision()
+
+    assert decision.use_dynamic is True
+    assert decision.reason == "dynamic_eligible"
+    assert downloader._can_use_dynamic_segments() is True
+    assert downloader.segment_decision_reason == "dynamic_eligible"
+
+
+def test_dynamic_segment_decision_fallback_reasons(tmp_path):
+    cases = [
+        ({"segment_mode": "static"}, {}, "segment_mode_static"),
+        ({"continue_download": True}, {}, "continue_not_supported"),
+        ({}, {"file_size": -1}, "unknown_file_size"),
+        ({}, {"header_info": {"Accept-Ranges": "none"}}, "accept_ranges_not_bytes"),
+        ({"force_sequential": True}, {}, "force_sequential_enabled"),
+        ({"max_concurrent_downloads": 1}, {}, "insufficient_workers"),
+        ({"min_split_size": "4K"}, {}, "file_too_small"),
+    ]
+
+    for manager_kwargs, downloader_attrs, expected_reason in cases:
+        downloader = make_decision_downloader(tmp_path, **manager_kwargs)
+        for name, value in downloader_attrs.items():
+            setattr(downloader, name, value)
+
+        decision = downloader._dynamic_segment_decision()
+
+        assert decision.use_dynamic is False
+        assert decision.reason == expected_reason
 
 
 def test_downloader_dynamic_allocator_uses_range_size_policy(tmp_path):
@@ -63,6 +121,12 @@ def test_manager_accepts_dynamic_segment_mode():
     manager = Manager(segment_mode="dynamic", log_path=None)
 
     assert manager.segment_mode == "dynamic"
+
+
+def test_manager_accepts_auto_segment_mode():
+    manager = Manager(segment_mode="auto", log_path=None)
+
+    assert manager.segment_mode == "auto"
 
 
 def test_manager_rejects_invalid_segment_mode():

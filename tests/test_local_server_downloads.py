@@ -274,6 +274,50 @@ def test_slow_head_succeeds_after_progress_delay(tmp_path):
         assert (tmp_path / "slow.bin").read_bytes() == PAYLOAD
 
 
+def test_auto_segment_download_uses_dynamic_for_range_server(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="auto",
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/bad-content-range.bin"),
+            file_name="auto-dynamic-validation.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "auto-dynamic-validation.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert "Content-Range start mismatch" in (manager.results[0].error or "")
+        assert manager.exit_code == 1
+
+
+def test_auto_segment_download_falls_back_to_static_for_unknown_size(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="auto",
+            log_path=None,
+        )
+        manager.append(
+            server.url("/unknown.bin"),
+            file_name="auto-unknown.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "auto-unknown.bin").read_bytes() == UNKNOWN_SIZE_PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
 def test_dynamic_segment_download_writes_exact_file_with_two_workers(tmp_path):
     with LocalDownloadServer() as server:
         manager = Manager(
@@ -449,7 +493,7 @@ def test_dynamic_segment_download_fails_after_range_retry_limit(tmp_path):
     with LocalDownloadServer() as server:
         manager = Manager(
             max_downloads=1,
-            max_concurrent_downloads=1,
+            max_concurrent_downloads=2,
             min_split_size="1K",
             segment_mode="dynamic",
             retry=0,
@@ -472,7 +516,7 @@ def test_dynamic_segment_download_splits_slow_range_once(tmp_path):
     with LocalDownloadServer() as server:
         manager = Manager(
             max_downloads=1,
-            max_concurrent_downloads=1,
+            max_concurrent_downloads=2,
             min_split_size="1K",
             segment_mode="dynamic",
             retry=1,
@@ -540,6 +584,28 @@ def test_cli_dynamic_segment_download(tmp_path):
             [
                 "--segment-mode",
                 "dynamic",
+                "-x",
+                "3",
+                "-k",
+                "1K",
+                "-N",
+                "1",
+                "-d",
+                str(tmp_path),
+                server.url("/normal.bin"),
+            ]
+        )
+
+        assert exit_code == 0
+        assert (tmp_path / "normal.bin").read_bytes() == PAYLOAD
+
+
+def test_cli_auto_segment_download(tmp_path):
+    with LocalDownloadServer() as server:
+        exit_code = cli.main(
+            [
+                "--segment-mode",
+                "auto",
                 "-x",
                 "3",
                 "-k",
