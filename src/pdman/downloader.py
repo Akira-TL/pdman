@@ -31,6 +31,7 @@ from .resume_metadata import (
     RESUME_METADATA_FILENAME,
     ResumeMetadataError,
     dynamic_resume_metadata_payload,
+    format_resume_rejection,
     inspect_resume_segments,
     load_resume_metadata,
     static_resume_metadata_payload,
@@ -699,7 +700,7 @@ class Downloader:
                 return self._chunks_from_resume_segments(inspect_resume_segments(payload))
             except ResumeMetadataError as e:
                 self._logger.warning(
-                    f"Resume metadata mismatch, discarding stale temp files: {e}"
+                    f"{format_resume_rejection(e)}; discarding stale temp files"
                 )
                 self._reset_tmp_with_pdm_info()
                 return None
