@@ -182,11 +182,13 @@ pdman --segment-mode auto -x 4 -k 1M "https://example.com/file.bin"
 `dynamic` / `auto` 使用同一组 eligibility 判断。以下情况会回退到 `static` 路径，并记录稳定的 fallback reason：
 
 - `continue_not_supported`：用户启用了 `--continue`。
-- `unknown_file_size`：文件大小未知。
+- `unknown_file_size`：文件大小未知，或 `Content-Length` 缺失、非法、非正。
 - `accept_ranges_not_bytes`：服务端未声明 `Accept-Ranges: bytes`。
 - `force_sequential_enabled`：用户启用了 `--force-sequential`。
 - `insufficient_workers`：单 URL worker 数不大于 1。
 - `file_too_small`：文件小于 `--min-split-size * 2`。
+
+v0.5.8 起，`Accept-Ranges` 判断会按逗号分隔 token 并大小写不敏感匹配 `bytes`，例如 `Bytes`、`BYTES`、`bytes, none` 都视为支持 byte ranges；缺失、空值或不包含 `bytes` 的值仍回退为 `accept_ranges_not_bytes`。
 
 v0.5.1 起，dynamic range size 使用以下策略：
 
@@ -215,7 +217,7 @@ pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --json
 pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --jsonl
 ```
 
-默认输出 readable 诊断摘要；`--json` 输出包含 `filter`、`stats`、`state_counts` 和过滤后 `ranges` 的结构化 payload；`--jsonl` 每个 range 输出一行 JSON，方便脚本和 agent 管道消费。`--state` 支持 `pending`、`active`、`completed`、`failed`、`unknown`。该命令只读取 v0.5.5+ 的 dynamic debug metadata，不恢复下载、不修改 metadata 或下载文件，也不保证跨大版本 metadata 兼容。
+默认输出 readable 诊断摘要；`--json` 输出包含 `filter`、`stats`、`state_counts` 和过滤后 `ranges` 的结构化 payload；`--jsonl` 每个 range 输出一行 JSON，方便脚本和 agent 管道消费。`--state` 支持 `pending`、`active`、`completed`、`failed`、`unknown`。v0.5.8 起，metadata 可包含向后兼容的 `selector` 诊断对象，记录 `requested_mode`、`selected_mode`、`reason` 和 `fallback_reason`；`pdman debug ranges --json` 会保留该字段，readable 输出也会显示 selector 摘要。metadata 写入改为原子替换，降低多 worker 同时更新 debug JSON 时产生损坏文件的风险。该命令只读取 v0.5.5+ 的 dynamic debug metadata，不恢复下载、不修改 metadata 或下载文件，也不保证跨大版本 metadata 兼容。
 
 v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
