@@ -9,9 +9,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import pdman.cli as cli
+from pdman.chunk import Chunk
 from pdman.manager import Manager
 from pdman.queue import load_queue
 from pdman.range_metadata import DYNAMIC_RANGE_METADATA_FILENAME
+from pdman.resume_metadata import RESUME_METADATA_FILENAME, static_resume_metadata_payload
 from pdman.status import TaskReason, TaskStatus
 
 PAYLOAD = (b"pdman-local-test-" * 8192) + b"end"
@@ -589,6 +591,51 @@ def test_dynamic_segment_download_validates_md5(tmp_path):
         asyncio.run(manager.download())
 
         assert (tmp_path / "dynamic-md5.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_static_continue_uses_resume_metadata_partial(tmp_path):
+    with LocalDownloadServer() as server:
+        url = server.url("/normal.bin")
+        file_name = "resume-static.bin"
+        tmp_root = tmp_path / "tmp-root"
+        tmp_dir = tmp_root / f".pdman.{hashlib.sha256(url.encode('utf-8')).hexdigest()[:6]}"
+        tmp_dir.mkdir(parents=True)
+        partial_path = tmp_dir / f"{file_name}.0"
+        partial_path.write_bytes(PAYLOAD[:12345])
+        (tmp_dir / ".pdm").write_text(
+            json.dumps(
+                {
+                    "url": url,
+                    "filename": file_name,
+                    "md5": None,
+                    "file_size": len(PAYLOAD),
+                }
+            ),
+            encoding="utf-8",
+        )
+        chunks = [Chunk(None, 0, len(PAYLOAD) - 1, str(partial_path))]
+        payload = static_resume_metadata_payload(
+            url=url,
+            filename=file_name,
+            target_path=tmp_path / file_name,
+            file_size=len(PAYLOAD),
+            chunks=chunks,
+        )
+        (tmp_dir / RESUME_METADATA_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            continue_download=True,
+            tmp_dir=str(tmp_root),
+            log_path=None,
+        )
+        manager.append(url, file_name=file_name, dir_path=str(tmp_path))
+        asyncio.run(manager.download())
+
+        assert (tmp_path / file_name).read_bytes() == PAYLOAD
         assert manager.results[0].status == TaskStatus.COMPLETED
         assert manager.exit_code == 0
 
