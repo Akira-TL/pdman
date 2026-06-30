@@ -20,7 +20,17 @@ from .history import (
     query_history,
 )
 from .manager import Manager
-from .output import print_json, print_jsonl, queue_records_payload, validation_report_payload
+from .output import (
+    print_json,
+    print_jsonl,
+    queue_add_payload,
+    queue_clear_payload,
+    queue_records_payload,
+    queue_recover_payload,
+    queue_remove_payload,
+    queue_repair_payload,
+    validation_report_payload,
+)
 from .queue import append_queue, clear_queue, create_queue_records, finish_queue_records
 from .queue import format_queue, format_queue_validation, load_queue, query_queue
 from .queue import recover_running, remove_queue_records, repair_queue
@@ -92,6 +102,7 @@ def handle_queue_add_command(argv=None) -> int:
     parser.add_argument("-d", "--dir", dest="dir_path", default=None)
     parser.add_argument("--file-name", default=None)
     parser.add_argument("--md5", default=None)
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
 
@@ -114,7 +125,10 @@ def handle_queue_add_command(argv=None) -> int:
                 task.dir_path = args.dir_path
     records = create_queue_records(tasks)
     append_queue(records, args.cache_dir)
-    print(f"Added {len(records)} queue record(s).")
+    if args.json:
+        print_json(queue_add_payload(records))
+    else:
+        print(f"Added {len(records)} queue record(s).")
     return 0
 
 
@@ -270,37 +284,49 @@ def handle_queue_validate_command(argv=None) -> int:
 
 def handle_queue_repair_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman queue repair")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     stats = repair_queue(args.cache_dir)
-    print("Repaired queue:")
-    for key in (
-        "kept",
-        "dropped_malformed",
-        "dropped_invalid",
-        "dropped_unsupported_schema",
-        "fixed",
-    ):
-        print(f"  {key}: {stats[key]}")
+    if args.json:
+        print_json(queue_repair_payload(stats))
+    else:
+        print("Repaired queue:")
+        for key in (
+            "kept",
+            "dropped_malformed",
+            "dropped_invalid",
+            "dropped_unsupported_schema",
+            "fixed",
+        ):
+            print(f"  {key}: {stats[key]}")
     return 0
 
 
 def handle_queue_recover_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman queue recover")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     recovered = recover_running(args.cache_dir)
-    print(f"Recovered {recovered} running queue record(s).")
+    if args.json:
+        print_json(queue_recover_payload(recovered))
+    else:
+        print(f"Recovered {recovered} running queue record(s).")
     return 0
 
 
 def handle_queue_remove_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman queue remove")
     parser.add_argument("queue_ids", nargs="+")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     removed = remove_queue_records(args.queue_ids, args.cache_dir)
-    print(f"Removed {removed} queue record(s).")
+    if args.json:
+        print_json(queue_remove_payload(args.queue_ids, removed))
+    else:
+        print(f"Removed {removed} queue record(s).")
     return 0
 
 
@@ -308,6 +334,7 @@ def handle_queue_clear_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman queue clear")
     parser.add_argument("--status", choices=("pending", "running", "completed", "skipped", "failed"), default=None)
     parser.add_argument("--all", dest="all_records", action="store_true")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     if not args.all_records and args.status is None:
@@ -318,7 +345,10 @@ def handle_queue_clear_command(argv=None) -> int:
         all_records=args.all_records,
         cache_dir=args.cache_dir,
     )
-    print(f"Cleared {cleared} queue record(s).")
+    if args.json:
+        print_json(queue_clear_payload(cleared, args.status, args.all_records))
+    else:
+        print(f"Cleared {cleared} queue record(s).")
     return 0
 
 
