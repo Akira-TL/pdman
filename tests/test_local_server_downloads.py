@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import socket
+from collections import namedtuple
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +14,11 @@ from pdman.status import TaskReason, TaskStatus
 PAYLOAD = (b"pdman-local-test-" * 8192) + b"end"
 UNKNOWN_SIZE_PAYLOAD = b"unknown-size-body" * 1024
 REQUIRED_UA = "PDMAN-Integration-Test/1.0"
+DiskUsage = namedtuple("DiskUsage", "total used free")
+
+
+def fake_disk_usage(free_bytes):
+    return lambda path: DiskUsage(total=10_000_000_000, used=0, free=free_bytes)
 
 
 class LocalDownloadHandler(BaseHTTPRequestHandler):
@@ -196,6 +202,34 @@ def test_download_writes_runtime_history_and_cleans_active_run(tmp_path):
         )
         assert history_record["filename"] == "runtime.bin"
         assert history_record["status"] == "completed"
+
+
+def test_system_tmp_space_insufficient_records_failed_result(monkeypatch, tmp_path):
+    monkeypatch.setattr("pdman.runtime.shutil.disk_usage", fake_disk_usage(10))
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            tmp_policy="system",
+            retry=0,
+            cache_dir=str(tmp_path / "cache"),
+            log_path=None,
+        )
+        manager.append(
+            server.url("/normal.bin"),
+            file_name="no-space.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "no-space.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.results[0].reason_code == TaskReason.TMP_SPACE_INSUFFICIENT
+        assert manager.exit_code == 1
+        history_record = json.loads(
+            manager.runtime_paths.history_path.read_text().splitlines()[0]
+        )
+        assert history_record["reason_code"] == "tmp_space_insufficient"
 
 
 def test_slow_head_is_failed_after_connection_timeout(tmp_path):

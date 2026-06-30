@@ -521,6 +521,33 @@ class Manager:
                     url_list = [url.strip() for url in url_list if url.strip()]
                     self.add_urls(url_list)
 
+    def resolve_task_tmp_decision(
+        self,
+        *,
+        task_id: str,
+        target_dir: str,
+        file_size: int | None,
+    ):
+        legacy_tmp = self.runtime_paths.target_tmp_dir(target_dir, task_id)
+        if self.continue_download and self.tmp_dir is None:
+            if (legacy_tmp / ".pdm").exists():
+                decision = self.runtime_paths.resolve_task_tmp_decision(
+                    task_id=task_id,
+                    target_dir=target_dir,
+                    tmp_dir=None,
+                    tmp_policy="target",
+                    file_size=file_size,
+                )
+                decision.reason = "using legacy target tmp directory for --continue"
+                return decision
+        return self.runtime_paths.resolve_task_tmp_decision(
+            task_id=task_id,
+            target_dir=target_dir,
+            tmp_dir=self.tmp_dir,
+            tmp_policy=self.tmp_policy,
+            file_size=file_size,
+        )
+
     def resolve_task_tmp_dir(
         self,
         *,
@@ -528,18 +555,12 @@ class Manager:
         target_dir: str,
         file_size: int | None,
     ) -> str:
-        legacy_tmp = self.runtime_paths.target_tmp_dir(target_dir, task_id)
-        if self.continue_download and self.tmp_dir is None:
-            if (legacy_tmp / ".pdm").exists():
-                return str(legacy_tmp)
         return str(
-            self.runtime_paths.resolve_task_tmp_dir(
+            self.resolve_task_tmp_decision(
                 task_id=task_id,
                 target_dir=target_dir,
-                tmp_dir=self.tmp_dir,
-                tmp_policy=self.tmp_policy,
                 file_size=file_size,
-            )
+            ).selected_dir
         )
 
     @auto_sync

@@ -13,6 +13,7 @@ from yarl import URL
 from glob import glob
 from rich.text import Text
 from urllib.parse import unquote
+from pathlib import Path
 from loguru._logger import Logger, Core
 
 from contextlib import suppress
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .manager import Manager
 from .chunk import Chunk
+from .runtime import TmpSpaceInsufficient
 from .status import TaskReason, TaskResult, TaskStatus
 
 
@@ -143,12 +145,23 @@ class Downloader:
         os.makedirs(self.filepath, exist_ok=True)
         self.file_size = self.file_size or await self.get_url_file_size()
         if self.pdm_tmp is None:
-            self.pdm_tmp = self.parent.resolve_task_tmp_dir(
+            tmp_decision = self.parent.resolve_task_tmp_decision(
                 task_id=sha,
                 target_dir=self.filepath,
                 file_size=self.file_size,
             )
-        os.makedirs(self.pdm_tmp, exist_ok=True)
+            self.pdm_tmp = str(tmp_decision.selected_dir)
+            if tmp_decision.fallback_used:
+                self._logger.warning(
+                    "System temporary directory has insufficient free space; "
+                    f"falling back to target tmp directory: {self.pdm_tmp}"
+                )
+        try:
+            os.makedirs(self.pdm_tmp, exist_ok=True)
+        except OSError as e:
+            raise TmpSpaceInsufficient(
+                Path(self.pdm_tmp), None, None, "mkdir"
+            ) from e
         self.creat_info()
         self.chunk_root = await self.rebuild_task()
         if self.chunk_root is None:
@@ -748,6 +761,21 @@ class Downloader:
                     TaskStatus.FAILED,
                     reason=reason,
                     reason_code=TaskReason.INTEGRITY_MISMATCH,
+                    error=str(e),
+                )
+            except TmpSpaceInsufficient as e:
+                if e.policy == "mkdir":
+                    reason = "temporary directory could not be created"
+                    reason_code = TaskReason.TMP_DIR_CREATE_FAILED
+                else:
+                    reason = "temporary directory has insufficient free space"
+                    reason_code = TaskReason.TMP_SPACE_INSUFFICIENT
+                self._logger.error(f"Failed {self.filename or self.url}: {reason}.")
+                self._done = False
+                return self.record_result(
+                    TaskStatus.FAILED,
+                    reason=reason,
+                    reason_code=reason_code,
                     error=str(e),
                 )
             except Exception as e:

@@ -23,6 +23,8 @@ class TaskReason(str, Enum):
     INTEGRITY_MISMATCH = "integrity_mismatch"
     MERGE_FAILED = "merge_failed"
     FILESYSTEM_ERROR = "filesystem_error"
+    TMP_SPACE_INSUFFICIENT = "tmp_space_insufficient"
+    TMP_DIR_CREATE_FAILED = "tmp_dir_create_failed"
     UNEXPECTED_ERROR = "unexpected_error"
 
 
