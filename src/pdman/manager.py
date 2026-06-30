@@ -39,6 +39,7 @@ from .chunk import Chunk
 from .downloader import Downloader
 from .runtime import RuntimePaths, task_result_to_record, utc_now_iso
 from .status import TaskResult, TaskStatus
+from .task_input import load_task_input
 from .utils import auto_sync
 
 
@@ -507,27 +508,17 @@ class Manager:
         returns:
             None
         """
-        with open(input_file, "r") as f:
-            content = f.read()
-            endfix = os.path.splitext(input_file)[1].lower()
-            assert type(content) == str
-            match endfix:
-                case ".json":
-                    try:
-                        data = json.loads(content)
-                        self.add_urls(data)
-                    except json.JSONDecodeError as e:
-                        self._logger.error(f"Failed to parse JSON: {e}")
-                case ".yaml" | ".yml":
-                    try:
-                        data = yaml.safe_load(content)
-                        self.add_urls(data)
-                    except yaml.YAMLError as e:
-                        self._logger.error(f"Failed to parse YAML: {e}")
-                case _:
-                    url_list = content.splitlines()
-                    url_list = [url.strip() for url in url_list if url.strip()]
-                    self.add_urls(url_list)
+        try:
+            for task in load_task_input(input_file):
+                self.append(
+                    task.url,
+                    md5=task.md5,
+                    file_name=task.file_name,
+                    dir_path=task.dir_path or self.out_dir or os.getcwd(),
+                    log_path=task.log_path,
+                )
+        except (json.JSONDecodeError, yaml.YAMLError, ValueError) as e:
+            self._logger.error(f"Failed to parse input file: {e}")
 
     def resolve_task_tmp_decision(
         self,
