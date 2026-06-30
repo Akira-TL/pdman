@@ -342,6 +342,136 @@ def test_queue_retry_failed_succeeds_against_flaky_local_http_server(tmp_path):
         assert records[0].status == "completed"
         assert records[0].attempts == 2
         assert records[0].last_error is None
+        assert records[0].last_status_reason == "download completed"
+
+
+def test_queue_retry_failed_max_attempts_blocks_retry(tmp_path):
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        download_dir = tmp_path / "downloads"
+        add_exit = cli.main(
+            [
+                "queue",
+                "add",
+                "--cache-dir",
+                str(cache_dir),
+                "-d",
+                str(download_dir),
+                "--file-name",
+                "blocked.bin",
+                server.url("/status.bin?status=503"),
+            ]
+        )
+        first_exit = cli.main(
+            [
+                "queue",
+                "start",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "--retry",
+                "0",
+            ]
+        )
+        retry_exit = cli.main(
+            [
+                "queue",
+                "retry-failed",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "1",
+                "--max-attempts",
+                "1",
+                "--retry",
+                "0",
+            ]
+        )
+
+        assert add_exit == 0
+        assert first_exit == 1
+        assert retry_exit == 0
+        records = load_queue(str(cache_dir))
+        assert records[0].status == "failed"
+        assert records[0].attempts == 1
+        assert records[0].last_error == "HTTP 503 during header check"
+        assert not (download_dir / "blocked.bin").exists()
+
+
+def test_queue_retry_failed_error_contains_selects_matching_failure(tmp_path):
+    FLAKY_COUNTS.clear()
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        download_dir = tmp_path / "downloads"
+        assert cli.main(
+            [
+                "queue",
+                "add",
+                "--cache-dir",
+                str(cache_dir),
+                "-d",
+                str(download_dir),
+                "--file-name",
+                "flaky-select.bin",
+                server.url("/flaky.bin"),
+            ]
+        ) == 0
+        assert cli.main(
+            [
+                "queue",
+                "add",
+                "--cache-dir",
+                str(cache_dir),
+                "-d",
+                str(download_dir),
+                "--file-name",
+                "notfound.bin",
+                server.url("/status.bin?status=404"),
+            ]
+        ) == 0
+        first_exit = cli.main(
+            [
+                "queue",
+                "start",
+                "--cache-dir",
+                str(cache_dir),
+                "--limit",
+                "2",
+                "-N",
+                "2",
+                "-x",
+                "1",
+                "--retry",
+                "0",
+            ]
+        )
+        retry_exit = cli.main(
+            [
+                "queue",
+                "retry-failed",
+                "--cache-dir",
+                str(cache_dir),
+                "--error-contains",
+                "503",
+                "-N",
+                "1",
+                "-x",
+                "1",
+            ]
+        )
+
+        assert first_exit == 1
+        assert retry_exit == 0
+        assert (download_dir / "flaky-select.bin").read_bytes() == PAYLOAD
+        assert not (download_dir / "notfound.bin").exists()
+        records = load_queue(str(cache_dir))
+        assert records[0].status == "completed"
+        assert records[0].attempts == 2
+        assert records[0].last_error is None
+        assert records[1].status == "failed"
+        assert records[1].attempts == 1
+        assert records[1].last_error == "HTTP 404 during header check"
 
 
 def test_queue_retry_failed_records_second_failure(tmp_path):
