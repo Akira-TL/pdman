@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .queue import QueueRecord, QueueValidationReport
+from .status import TaskResult
 
 
 def print_json(data: dict[str, Any]) -> None:
@@ -13,6 +14,20 @@ def print_json(data: dict[str, Any]) -> None:
 def print_jsonl(records: list[dict[str, Any]]) -> None:
     for record in records:
         print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+
+
+def resume_rejection_payload(source: TaskResult | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(source, TaskResult):
+        code = source.resume_rejection_code
+        reason = source.resume_rejection_reason
+    else:
+        code = source.get("resume_rejection_code")
+        reason = source.get("resume_rejection_reason")
+    return {
+        "present": bool(code or reason),
+        "code": code,
+        "reason": reason,
+    }
 
 
 def queue_record_to_dict(record: QueueRecord) -> dict[str, Any]:
