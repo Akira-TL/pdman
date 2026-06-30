@@ -50,7 +50,7 @@
 | `-x, --max-concurrent-downloads INT` | 单个 URL 内部最大分块并发数 |
 | `-Z, --force-sequential` | 强制顺序下载 |
 | `-k, --min-split-size SIZE` | 最小分块大小，支持 `K` / `M` 后缀 |
-| `--segment-mode static|dynamic` | 分段模式；默认 `static`，`dynamic` 为 v0.5.0 实验性 range allocator 模式 |
+| `--segment-mode static|dynamic|auto` | 分段模式；默认 `static`，`dynamic` 为显式实验性 range allocator 模式，`auto` 为 v0.5.6 实验性自动选择模式 |
 | `--max-connection-per-server INT` | 单服务器最大连接数；`0` 表示不限制 |
 | `-c, --continue` | 启用断点续传 |
 | `--tmp DIR` | 指定分块临时文件根目录 |
@@ -170,18 +170,23 @@ v0.5.0 引入显式分段模式参数：
 ```bash
 pdman --segment-mode static "https://example.com/file.bin"
 pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
+pdman --segment-mode auto -x 4 -k 1M "https://example.com/file.bin"
 ```
 
 | 模式 | 行为 |
 | --- | --- |
 | `static` | 默认行为，保留原有静态 chunk slicing 和中途拆分路径 |
-| `dynamic` | 实验性动态 range allocator；根据文件大小、worker 数和 `--min-split-size` 生成 ranges，多 worker 反复领取 range，完成后按 offset 合并 |
+| `dynamic` | 显式实验性动态 range allocator；根据文件大小、worker 数和 `--min-split-size` 生成 ranges，多 worker 反复领取 range，完成后按 offset 合并 |
+| `auto` | 实验性 selector；仅在满足 dynamic eligibility 时使用 dynamic，否则回退 static |
 
-`dynamic` 模式只在文件大小已知、服务端声明 `Accept-Ranges: bytes` 且未启用 `--continue` 时使用。以下情况会回退到 `static` 路径：
+`dynamic` / `auto` 使用同一组 eligibility 判断。以下情况会回退到 `static` 路径，并记录稳定的 fallback reason：
 
-- 文件大小未知。
-- 服务端未声明 `Accept-Ranges: bytes`。
-- 用户启用了 `--continue`。
+- `continue_not_supported`：用户启用了 `--continue`。
+- `unknown_file_size`：文件大小未知。
+- `accept_ranges_not_bytes`：服务端未声明 `Accept-Ranges: bytes`。
+- `force_sequential_enabled`：用户启用了 `--force-sequential`。
+- `insufficient_workers`：单 URL worker 数不大于 1。
+- `file_too_small`：文件小于 `--min-split-size * 2`。
 
 v0.5.1 起，dynamic range size 使用以下策略：
 

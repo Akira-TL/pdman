@@ -10,7 +10,7 @@
 
 - **多连接分块下载**：通过 HTTP Range 请求将同一 URL 拆分为多个分块并发下载。
 - **断点续传**：使用 `.pdman.<sha>` 临时目录保存分块和元信息，可通过 `--continue` 恢复下载。
-- **动态分块调度**：默认 static 模式保留原有中途拆分能力；v0.5.0 起可用 `--segment-mode dynamic` 启用实验性 range allocator。
+- **动态分块调度**：默认 static 模式保留原有中途拆分能力；v0.5.0 起可用 `--segment-mode dynamic` 启用实验性 range allocator，v0.5.6 起可用 `--segment-mode auto` 试验自动选择。
 - **低速分片重启**：通过 `--chunk-retry-speed` 检测低速分块并自动重试，避免单个连接拖慢整体任务。
 - **批量任务**：支持从纯文本、JSON、YAML 文件读取多个下载任务。
 - **并发控制**：支持任务级并发、单 URL 分块并发、单服务器连接数限制。
@@ -140,13 +140,14 @@ pdman -N 4 -x 8 "https://example.com/file.bin"
 - `--max-connection-per-server`：单服务器最大连接数，`0` 表示不限制。
 - `-Z, --force-sequential`：强制顺序下载。
 
-v0.5.0 开始提供实验性的动态分段模式。默认仍是兼容旧行为的 static 模式；需要显式启用 dynamic：
+v0.5.0 开始提供实验性的动态分段模式。默认仍是兼容旧行为的 static 模式；可以显式启用 dynamic，也可以用 v0.5.6 引入的 auto selector 试验自动选择：
 
 ```bash
 pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
+pdman --segment-mode auto -x 4 -k 1M "https://example.com/file.bin"
 ```
 
-`--segment-mode dynamic` 会使用 range allocator 生成可领取的 ranges，多 worker 持续领取 range 并按 offset 合并。v0.5.1 起 dynamic range size 会按文件大小、worker 数和 `--min-split-size` 计算：至少不小于 `--min-split-size`，目标约为每个 worker 4 个 ranges，并按 64 KiB 边界对齐，避免大文件产生过多小 range。v0.5.2 起，dynamic range 下载失败或低于 `--chunk-retry-speed` 时会删除该 range 的 partial 文件并重新入队，超过 `--retry` 后任务失败。v0.5.3 起，低速 range 会优先把已下载 partial 保留为 completed range，并把剩余区间拆成 child range 继续下载；普通网络失败仍保持删除 partial 后 retry。v0.5.4 起，dynamic mode 会校验 206 响应的 `Content-Range` start/end/total，partial range 收到 200、缺失或不匹配的 `Content-Range`、短 body 都会作为 range failure 处理。v0.5.5 起，dynamic mode 会在任务 tmp 目录写入 `dynamic-ranges.json` debug metadata draft，记录 range states、attempts、errors、speed 和 allocator stats；该文件只用于调试，不是 resume contract。v0.5.x 暂不做 dynamic resume 或默认启用 dynamic；未知文件大小、`--continue` 或服务端未声明 `Accept-Ranges: bytes` 时会回退到 static 路径。
+`--segment-mode dynamic` 会使用 range allocator 生成可领取的 ranges，多 worker 持续领取 range 并按 offset 合并。`--segment-mode auto` 会在文件大小已知、服务端声明 `Accept-Ranges: bytes`、未启用 `--continue`、未强制顺序下载、worker 数大于 1 且文件足够大时选择 dynamic，否则回退 static；默认仍是 static。v0.5.1 起 dynamic range size 会按文件大小、worker 数和 `--min-split-size` 计算：至少不小于 `--min-split-size`，目标约为每个 worker 4 个 ranges，并按 64 KiB 边界对齐，避免大文件产生过多小 range。v0.5.2 起，dynamic range 下载失败或低于 `--chunk-retry-speed` 时会删除该 range 的 partial 文件并重新入队，超过 `--retry` 后任务失败。v0.5.3 起，低速 range 会优先把已下载 partial 保留为 completed range，并把剩余区间拆成 child range 继续下载；普通网络失败仍保持删除 partial 后 retry。v0.5.4 起，dynamic mode 会校验 206 响应的 `Content-Range` start/end/total，partial range 收到 200、缺失或不匹配的 `Content-Range`、短 body 都会作为 range failure 处理。v0.5.5 起，dynamic mode 会在任务 tmp 目录写入 `dynamic-ranges.json` debug metadata draft，记录 range states、attempts、errors、speed 和 allocator stats；该文件只用于调试，不是 resume contract。v0.5.x 暂不做 dynamic resume 或默认启用 dynamic。
 
 ### 重试与超时
 
