@@ -4,6 +4,7 @@ import pytest
 
 from pdman.range_metadata_inspect import (
     RangeMetadataError,
+    find_latest_range_metadata,
     filter_ranges,
     format_range_metadata,
     load_range_metadata,
@@ -225,3 +226,32 @@ def test_jsonl_shape_can_emit_one_object_per_line():
 
     assert len(lines) == 4
     assert [json.loads(line)["index"] for line in lines] == [0, 1, 2, 3]
+
+
+def test_find_latest_range_metadata_returns_newest_valid_file(tmp_path):
+    older_dir = tmp_path / "old" / "task"
+    newer_dir = tmp_path / "new" / "task"
+    older_dir.mkdir(parents=True)
+    newer_dir.mkdir(parents=True)
+    older = write_metadata(older_dir)
+    newer = write_metadata(newer_dir)
+    older.touch()
+    newer.touch()
+
+    assert find_latest_range_metadata([tmp_path]) == newer
+
+
+def test_find_latest_range_metadata_skips_invalid_files(tmp_path):
+    invalid_dir = tmp_path / "invalid"
+    valid_dir = tmp_path / "valid"
+    invalid_dir.mkdir()
+    valid_dir.mkdir()
+    invalid = invalid_dir / "dynamic-ranges.json"
+    invalid.write_text(json.dumps({"schema_version": 99}), encoding="utf-8")
+    valid = write_metadata(valid_dir)
+
+    assert find_latest_range_metadata([tmp_path]) == valid
+
+
+def test_find_latest_range_metadata_returns_none_when_missing(tmp_path):
+    assert find_latest_range_metadata([tmp_path]) is None
