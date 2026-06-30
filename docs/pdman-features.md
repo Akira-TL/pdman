@@ -336,12 +336,19 @@ pdman queue list
 pdman queue list --status pending
 pdman queue start
 pdman queue start --limit 5
+pdman queue validate
+pdman queue repair
+pdman queue recover
+pdman queue remove <queue-id>
+pdman queue clear --status completed
+pdman queue clear --all
 ```
 
 queue record schema：
 
 ```json
 {
+  "schema_version": 1,
   "queue_id": "20260701T120000Z-a1b2c3d4",
   "url": "https://example.com/file.bin",
   "file_name": "file.bin",
@@ -367,7 +374,23 @@ queue status：
 
 `queue start` 会读取 queue 中的任务，真实创建 `Manager` 并执行下载，然后根据 `Manager.results` 更新 queue 状态。测试使用本地 HTTP server 覆盖成功下载和 HTTP 失败路径，不使用 mock Manager。
 
-限制：v0.4.3 不提供多进程写入安全保证，不提供 queue 删除、retry-failed、优先级、daemon、SQLite 或 agent event stream。
+v0.4.4 加固内容：
+
+| 项目 | 行为 |
+| --- | --- |
+| `schema_version` | 当前为 `1`；无版本号的 v0.4.3 legacy record 会按 v1 读取 |
+| future schema | `schema_version > 1` 会被跳过，`validate` 会报告 unsupported schema |
+| queue lock | 写路径使用 `~/.cache/pdman/queue.lock` |
+| POSIX backend | Linux/macOS/BSD 使用 `fcntl.flock` |
+| Windows backend | Windows 使用 `msvcrt.locking` |
+| fallback backend | 其他平台使用 atomic directory lock |
+| `queue validate` | 报告 malformed JSON、缺字段、非法状态、重复 ID、future schema |
+| `queue repair` | 丢弃坏行/不可修复记录，补 schema/timestamp/ID，修复非法状态 |
+| `queue recover` | 将 stale `running` 恢复为 `pending` |
+| `queue remove` | 按 queue_id 删除记录 |
+| `queue clear` | 按状态或 `--all` 清理记录 |
+
+限制：v0.4.4 不提供 retry-failed、优先级、daemon、SQLite、网络文件系统强一致锁或 agent event stream。
 
 ---
 

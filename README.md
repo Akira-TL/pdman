@@ -259,11 +259,21 @@ pdman queue list
 pdman queue list --status pending
 pdman queue start
 pdman queue start --limit 5
+pdman queue validate
+pdman queue repair
+pdman queue recover
+pdman queue remove <queue-id>
+pdman queue clear --status completed
+pdman queue clear --all
 ```
 
 队列文件位于 `~/.cache/pdman/queue.jsonl`。`queue start` 会读取 `pending` 任务，使用真实 `Manager` 执行下载，并把队列状态更新为 `completed`、`skipped` 或 `failed`。
 
-当前队列是单进程 JSONL 基础实现，不保证多个 pdman 进程同时写入安全；`retry-failed`、删除/清理、优先级、daemon 和 SQLite 放到后续版本。
+v0.4.4 开始，queue record 会写入 `schema_version=1`，queue 写操作会使用 `~/.cache/pdman/queue.lock`。锁 backend 会按平台自动选择：Linux/macOS/BSD 使用 `fcntl`，Windows 使用 `msvcrt`，其他平台使用原子目录锁 fallback。
+
+维护命令用于检查、修复和清理 queue：`validate` 只报告问题，`repair` 会重写为可用 queue，`recover` 会把 stale `running` 任务恢复为 `pending`，`remove` 按 ID 删除，`clear` 按状态或 `--all` 清理。
+
+当前队列不提供 `retry-failed`、优先级、daemon 和 SQLite，这些放到后续版本。
 
 ### 任务结果与退出码
 
