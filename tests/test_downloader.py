@@ -1,8 +1,10 @@
 import asyncio
+import json
 
 from pdman.chunk import Chunk
 from pdman.downloader import Downloader
 from pdman.manager import Manager
+from pdman.resume_metadata import RESUME_METADATA_FILENAME, static_resume_metadata_payload
 from pdman.status import TaskReason, TaskStatus
 
 
@@ -167,6 +169,145 @@ def test_manager_rejects_invalid_segment_mode():
         assert "Invalid segment_mode" in str(e)
     else:
         raise AssertionError("invalid segment mode should raise")
+
+
+def test_downloader_writes_static_resume_metadata(tmp_path):
+    async def run_case():
+        manager = Manager(log_path=None)
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_path / "tmp"),
+        )
+        downloader.file_size = 2048
+        downloader.header_info = {
+            "ETag": "abc123",
+            "Last-Modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+        }
+        downloader.chunk_root = Chunk(downloader, 0, 1023, str(tmp_path / "tmp" / "file.bin.0"))
+        downloader.chunk_root.next = Chunk(
+            downloader,
+            1024,
+            2047,
+            str(tmp_path / "tmp" / "file.bin.1024"),
+            downloader.chunk_root,
+        )
+        (tmp_path / "tmp").mkdir()
+        (tmp_path / "tmp" / "file.bin.0").write_bytes(b"x" * 1024)
+
+        await downloader._write_static_resume_metadata()
+
+        payload = json.loads(
+            (tmp_path / "tmp" / RESUME_METADATA_FILENAME).read_text(encoding="utf-8")
+        )
+        assert payload["mode"] == "static"
+        assert payload["url"] == "https://example.com/file.bin"
+        assert payload["target_path"] == str(tmp_path / "file.bin")
+        assert payload["etag"] == "abc123"
+        assert payload["last_modified"] == "Wed, 01 Jan 2025 00:00:00 GMT"
+        assert payload["segments"][0]["state"] == "completed"
+        assert payload["segments"][1]["state"] == "pending"
+
+    asyncio.run(run_case())
+
+
+def test_rebuild_task_uses_strict_resume_metadata_layout(tmp_path):
+    async def run_case():
+        manager = Manager(continue_download=True, log_path=None)
+        tmp_dir = tmp_path / "tmp"
+        tmp_dir.mkdir()
+        first_path = tmp_dir / "file.bin.0"
+        second_path = tmp_dir / "file.bin.1024"
+        first_path.write_bytes(b"x" * 1024)
+        expected_chunks = [
+            Chunk(None, 0, 1023, str(first_path)),
+            Chunk(None, 1024, 2047, str(second_path)),
+        ]
+        payload = static_resume_metadata_payload(
+            url="https://example.com/file.bin",
+            filename="file.bin",
+            target_path=tmp_path / "file.bin",
+            file_size=2048,
+            chunks=expected_chunks,
+            etag="abc123",
+            last_modified="Wed, 01 Jan 2025 00:00:00 GMT",
+        )
+        (tmp_dir / RESUME_METADATA_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_dir),
+        )
+        downloader.file_size = 2048
+        downloader.header_info = {
+            "ETag": "abc123",
+            "Last-Modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+        }
+
+        root = await downloader.rebuild_task()
+
+        assert root is not None
+        assert root.start == 0
+        assert root.end == 1023
+        assert root.size == 1024
+        assert root.next is not None
+        assert root.next.start == 1024
+        assert root.next.end == 2047
+        assert root.next.size == 0
+
+    asyncio.run(run_case())
+
+
+def test_rebuild_task_rejects_mismatched_resume_metadata(tmp_path):
+    async def run_case():
+        manager = Manager(continue_download=True, log_path=None)
+        tmp_dir = tmp_path / "tmp"
+        tmp_dir.mkdir()
+        partial_path = tmp_dir / "file.bin.0"
+        partial_path.write_bytes(b"stale")
+        payload = {
+            "schema_version": 2,
+            "kind": "resume",
+            "mode": "static",
+            "url": "https://example.com/other.bin",
+            "filename": "file.bin",
+            "target_path": str(tmp_path / "file.bin"),
+            "file_size": 5,
+            "etag": None,
+            "last_modified": None,
+            "created_at": None,
+            "updated_at": None,
+            "segments": [
+                {
+                    "index": 0,
+                    "start": 0,
+                    "end": 4,
+                    "path": str(partial_path),
+                    "expected_size": 5,
+                    "existing_size": 5,
+                    "state": "completed",
+                }
+            ],
+        }
+        (tmp_dir / RESUME_METADATA_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_dir),
+        )
+        downloader.file_size = 5
+        downloader.header_info = {}
+
+        assert await downloader.rebuild_task() is None
+        assert not partial_path.exists()
+
+    asyncio.run(run_case())
 
 
 def test_refresh_downloaded_bytes_uses_existing_chunk_sizes(tmp_path):
