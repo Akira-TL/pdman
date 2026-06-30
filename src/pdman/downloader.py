@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .manager import Manager
 from .chunk import Chunk, STREAM_CHUNK_SIZE
 from .range_allocator import RangeAllocator, choose_dynamic_range_size
+from .range_response import RangeResponseValidationError, validate_range_response
 from .range_task import RangeTask
 from .runtime import TmpSpaceInsufficient
 from .status import TaskReason, TaskResult, TaskStatus
@@ -60,6 +61,26 @@ class HeaderStatusSkip(Exception):
             f"Remote server returned HTTP {self.status}{reason} "
             f"while checking headers for {self.url}"
         )
+
+
+class RangeResponseError(Exception):
+    def __init__(
+        self,
+        task: RangeTask,
+        message: str,
+        *,
+        status: int | None = None,
+        content_range: str | None = None,
+    ):
+        self.task = task
+        self.status = status
+        self.content_range = content_range
+        detail = f"range {task.start}-{task.end}: {message}"
+        if status is not None:
+            detail += f"; status={status}"
+        if content_range is not None:
+            detail += f"; Content-Range={content_range!r}"
+        super().__init__(detail)
 
 
 class SlowRangeError(Exception):
@@ -767,22 +788,31 @@ class Downloader:
             pos = raw_existing
             window_bytes = 0
             window_start = time.time()
+            requested_start = task.start + pos
+            requested_end = task.end
             headers = self.build_request_headers()
-            headers["Range"] = f"bytes={task.start + pos}-{task.end}"
+            headers["Range"] = f"bytes={requested_start}-{requested_end}"
             async with session.get(
                 self.url,
                 headers=headers,
                 timeout=self.parent.chunk_timeout,
             ) as response:
-                full_file_range = task.start == 0 and task.end == self.file_size - 1
-                if response.status == 200 and not full_file_range:
-                    raise RuntimeError(
-                        f"server ignored Range request for {task.start}-{task.end}"
+                content_range = response.headers.get("Content-Range")
+                try:
+                    validate_range_response(
+                        status=response.status,
+                        requested_start=requested_start,
+                        requested_end=requested_end,
+                        file_size=self.file_size,
+                        content_range=content_range,
                     )
-                if response.status not in (200, 206):
-                    raise RuntimeError(
-                        f"HTTP {response.status} while downloading range {task.start}-{task.end}"
-                    )
+                except RangeResponseValidationError as e:
+                    raise RangeResponseError(
+                        task,
+                        str(e),
+                        status=response.status,
+                        content_range=content_range,
+                    ) from e
                 async for data in response.content.iter_chunked(STREAM_CHUNK_SIZE):
                     remaining = task.expected_size - pos
                     if remaining <= 0:
