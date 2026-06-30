@@ -152,6 +152,7 @@ class Manager:
         tmp_dir: str = None,
         tmp_policy: str = "auto",
         cache_dir: str = None,
+        keep_tmp: bool = False,
         user_agent: dict | str = None,
         chunk_retry_speed: str | int = None,
         chunk_timeout: int = 10,
@@ -207,6 +208,7 @@ class Manager:
         self.tmp_dir = tmp_dir
         self.tmp_policy = tmp_policy
         self.cache_dir = cache_dir
+        self.keep_tmp = keep_tmp
         self.runtime_paths = RuntimePaths.create(cache_dir=cache_dir)
         self.run_id = self.runtime_paths.run_id
         self.user_agent = user_agent
@@ -263,6 +265,12 @@ class Manager:
         self.run_started_at: str | None = None
         self.run_finished_at: str | None = None
         self._runtime_active = False
+        self.tmp_cleanup = {
+            "policy": "cleanup_on_finish",
+            "kept": False,
+            "run_dir": str(self.runtime_paths.run_dir),
+            "error": None,
+        }
         # 先设置 summary_interval 再调用 _parse_config（这样 _parse_config 可以用）
         self._parse_config()
 
@@ -276,7 +284,7 @@ class Manager:
             "max_overall_download_limit", "http_auth", "proxy_auth", "headers",
             "connect_timeout", "connect_progress_delay",
             "max_connection_per_server", "summary_interval",
-            "tmp_policy", "tmp_dir", "cache_dir",
+            "tmp_policy", "tmp_dir", "cache_dir", "keep_tmp",
         }
         for k, v in kwargs.items():
             if hasattr(self, k) and not k.startswith("_"):
@@ -642,6 +650,7 @@ class Manager:
             "cache_root": str(self.runtime_paths.cache_root),
             "task_counts": self._task_counts(),
             "exit_code": self.exit_code,
+            "tmp_cleanup": self.tmp_cleanup,
         }
 
     def _write_active_run(self) -> None:
@@ -657,9 +666,24 @@ class Manager:
 
     def _finish_runtime_run(self) -> None:
         self.run_finished_at = utc_now_iso()
+        self.tmp_cleanup = {
+            "policy": "keep_failed" if self.keep_tmp and self.exit_code != 0 else "cleanup_on_finish",
+            "kept": False,
+            "run_dir": str(self.runtime_paths.run_dir),
+            "error": None,
+        }
+        if self.keep_tmp and self.exit_code != 0:
+            self.tmp_cleanup["kept"] = True
+        else:
+            try:
+                self.runtime_paths.cleanup_run_dir()
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                self.tmp_cleanup["kept"] = True
+                self.tmp_cleanup["error"] = str(e)
         self.runtime_paths.write_final_run(self._run_payload("finished"))
         self.runtime_paths.clear_active_run()
-        self.runtime_paths.cleanup_run_dir()
         self._runtime_active = False
 
     @staticmethod

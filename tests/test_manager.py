@@ -115,3 +115,68 @@ def test_manager_writes_run_metadata_and_history(tmp_path):
     history_record = json.loads(history[0])
     assert history_record["status"] == "completed"
     assert history_record["filename"] == "ok.bin"
+    assert final_run["tmp_cleanup"] == {
+        "policy": "cleanup_on_finish",
+        "kept": False,
+        "run_dir": str(manager.runtime_paths.run_dir),
+        "error": None,
+    }
+
+
+def test_manager_keep_tmp_preserves_failed_run_dir(tmp_path):
+    manager = Manager(
+        log_path=None,
+        cache_dir=str(tmp_path / "cache"),
+        keep_tmp=True,
+    )
+    manager._start_runtime_run()
+    marker = manager.runtime_paths.run_dir / "debug.marker"
+    marker.write_text("keep me")
+
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/bad.bin",
+            filename="bad.bin",
+            status=TaskStatus.FAILED,
+            reason="temporary directory has insufficient free space",
+            reason_code=TaskReason.TMP_SPACE_INSUFFICIENT,
+        )
+    )
+    manager._finish_runtime_run()
+
+    final_run = json.loads(manager.runtime_paths.final_run_path.read_text())
+    assert manager.runtime_paths.run_dir.exists()
+    assert marker.exists()
+    assert final_run["tmp_cleanup"] == {
+        "policy": "keep_failed",
+        "kept": True,
+        "run_dir": str(manager.runtime_paths.run_dir),
+        "error": None,
+    }
+
+
+def test_manager_without_keep_tmp_cleans_failed_run_dir(tmp_path):
+    manager = Manager(
+        log_path=None,
+        cache_dir=str(tmp_path / "cache"),
+        keep_tmp=False,
+    )
+    manager._start_runtime_run()
+    marker = manager.runtime_paths.run_dir / "debug.marker"
+    marker.write_text("delete me")
+
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/bad.bin",
+            filename="bad.bin",
+            status=TaskStatus.FAILED,
+            reason="temporary directory has insufficient free space",
+            reason_code=TaskReason.TMP_SPACE_INSUFFICIENT,
+        )
+    )
+    manager._finish_runtime_run()
+
+    final_run = json.loads(manager.runtime_paths.final_run_path.read_text())
+    assert not manager.runtime_paths.run_dir.exists()
+    assert final_run["tmp_cleanup"]["policy"] == "cleanup_on_finish"
+    assert final_run["tmp_cleanup"]["kept"] is False

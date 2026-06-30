@@ -732,7 +732,7 @@ class Downloader:
                     continue
                 reason = e.summary()
                 self._logger.error(f"Failed {self.filename or self.url}: {reason}.")
-                if self.pdm_tmp:
+                if self.pdm_tmp and not self.parent.keep_tmp:
                     await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
                 self._done = False
                 return self.record_result(
@@ -744,7 +744,7 @@ class Downloader:
             except ConnectionTimeoutSkip as e:
                 reason = str(e)
                 self._logger.error(f"Failed {self.filename or self.url}: {reason}.")
-                if self.pdm_tmp:
+                if self.pdm_tmp and not self.parent.keep_tmp:
                     await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
                 self._done = False
                 return self.record_result(
