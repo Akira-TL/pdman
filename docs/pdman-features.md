@@ -335,14 +335,19 @@ pdman queue add -d /data/downloads --file-name file.bin "https://example.com/fil
 pdman queue list
 pdman queue list --status pending
 pdman queue list --status failed --attempts-ge 3
+pdman queue list --json
+pdman queue list --jsonl
 pdman queue start
 pdman queue start --limit 5
 pdman queue retry-failed
 pdman queue retry-failed --limit 5
 pdman queue retry-failed --dry-run
+pdman queue retry-failed --dry-run --json
+pdman queue retry-failed --dry-run --jsonl
 pdman queue retry-failed --max-attempts 3
 pdman queue retry-failed --error-contains "HTTP 503"
 pdman queue validate
+pdman queue validate --json
 pdman queue repair
 pdman queue recover
 pdman queue remove <queue-id>
@@ -384,6 +389,18 @@ queue status：
 
 v0.4.5 增加 `attempts` 字段和 `queue retry-failed`。每次 queue record 被 `queue start` 或 `queue retry-failed` 取出执行时，`attempts += 1`。`retry-failed` 只选取 `failed` 记录，成功后写回 `completed` 且清空 `last_error`，失败后保持 `failed` 并更新 `last_error`。`queue start --status failed` 仍保留，但文档主推 `queue retry-failed`。
 
+v0.4.7 增加 queue structured output 基础，目标是让人、脚本和后续 agent 能稳定读取 queue 查询结果，但不提前引入全局输出协议或 event stream。
+
+| 命令 | 输出契约 |
+| --- | --- |
+| `queue list --json` | 输出 `{records, count}`；`records` 是 queue record 数组 |
+| `queue list --jsonl` | 每行一个 queue record，适合管道和 `jq` |
+| `queue retry-failed --dry-run --json` | 输出 `{candidates, count, dry_run}`；不修改 queue |
+| `queue retry-failed --dry-run --jsonl` | 每行一个 retry candidate；不修改 queue |
+| `queue validate --json` | 输出 `{ok, valid, malformed, invalid, duplicate_ids, unsupported_schema, issues}` |
+
+限制：`retry-failed --json/--jsonl` 只支持和 `--dry-run` 搭配；实际执行下载、普通 download summary、history/runs 查询仍保持人类文本输出。完整 agent event stream 仍属于后续 v0.9.x 范围。
+
 v0.4.6 增加 retry policy 人工控制边界：
 
 | 参数/字段 | 行为 |
@@ -411,7 +428,7 @@ v0.4.4 加固内容：
 | `queue remove` | 按 queue_id 删除记录 |
 | `queue clear` | 按状态或 `--all` 清理记录 |
 
-限制：v0.4.6 不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon、SQLite、网络文件系统强一致锁或 agent event stream。
+限制：v0.4.7 不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon、SQLite、网络文件系统强一致锁、全局 JSON/JSONL 输出协议或 agent event stream。
 
 ---
 

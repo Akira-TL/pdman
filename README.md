@@ -258,14 +258,19 @@ pdman queue add -d /data/downloads --file-name file.bin "https://example.com/fil
 pdman queue list
 pdman queue list --status pending
 pdman queue list --status failed --attempts-ge 3
+pdman queue list --json
+pdman queue list --jsonl
 pdman queue start
 pdman queue start --limit 5
 pdman queue retry-failed
 pdman queue retry-failed --limit 5
 pdman queue retry-failed --dry-run
+pdman queue retry-failed --dry-run --json
+pdman queue retry-failed --dry-run --jsonl
 pdman queue retry-failed --max-attempts 3
 pdman queue retry-failed --error-contains "HTTP 503"
 pdman queue validate
+pdman queue validate --json
 pdman queue repair
 pdman queue recover
 pdman queue remove <queue-id>
@@ -279,11 +284,13 @@ v0.4.5 开始，queue record 会记录 `attempts`。每次 `queue start` 或 `qu
 
 v0.4.6 开始，queue record 会记录 `last_status_reason`，用于保存最近一次 completed/skipped/failed 的原因。`retry-failed --dry-run` 只预览候选，不修改 queue；`--max-attempts N` 只重试 `attempts < N` 的失败记录；`--error-contains TEXT` 只重试 `last_error` 包含指定文本的失败记录，匹配不区分大小写。
 
+v0.4.7 开始，queue 查询/预览/校验命令提供最小结构化输出：`queue list --json` 输出 `{records, count}`，`queue list --jsonl` 每行输出一个 queue record；`queue retry-failed --dry-run --json` 输出 `{candidates, count, dry_run}`，`--jsonl` 每行输出一个候选 record；`queue validate --json` 输出 `{ok, valid, malformed, invalid, duplicate_ids, unsupported_schema, issues}`。`retry-failed --json/--jsonl` 只允许和 `--dry-run` 搭配，普通下载和实际 retry 执行输出仍保持人类文本。
+
 v0.4.4 开始，queue record 会写入 `schema_version=1`，queue 写操作会使用 `~/.cache/pdman/queue.lock`。锁 backend 会按平台自动选择：Linux/macOS/BSD 使用 `fcntl`，Windows 使用 `msvcrt`，其他平台使用原子目录锁 fallback。
 
 维护命令用于检查、修复和清理 queue：`validate` 只报告问题，`repair` 会重写为可用 queue，`recover` 会把 stale `running` 任务恢复为 `pending`，`remove` 按 ID 删除，`clear` 按状态或 `--all` 清理。
 
-当前队列不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon 和 SQLite，这些放到后续版本。
+当前队列不提供自动 retry scheduler、backoff、per-record retry policy、优先级、daemon、SQLite、全局 JSON/JSONL 输出协议或 agent event stream，这些放到后续版本。
 
 ### 任务结果与退出码
 
