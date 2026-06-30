@@ -62,6 +62,17 @@ class HeaderStatusSkip(Exception):
         )
 
 
+class SlowRangeError(Exception):
+    def __init__(self, task: RangeTask, speed_bps: float, threshold_bps: int):
+        self.task = task
+        self.speed_bps = speed_bps
+        self.threshold_bps = threshold_bps
+        super().__init__(
+            f"range {task.start}-{task.end} speed {speed_bps:.1f} B/s "
+            f"below threshold {threshold_bps} B/s"
+        )
+
+
 class IntegrityCheckFailure(Exception):
     def __init__(self, filename: str, expected: str, actual: str):
         self.filename = filename
@@ -747,12 +758,15 @@ class Downloader:
             raw_existing = 0
         if raw_existing == task.expected_size:
             return task
+        task.downloaded_bytes = raw_existing
         file_mode = "ab" if raw_existing else "wb"
         async with (
             self._build_client_session() as session,
             aiofiles.open(task.path, file_mode) as f,
         ):
             pos = raw_existing
+            window_bytes = 0
+            window_start = time.time()
             headers = self.build_request_headers()
             headers["Range"] = f"bytes={task.start + pos}-{task.end}"
             async with session.get(
@@ -777,8 +791,24 @@ class Downloader:
                     await f.write(data)
                     written = len(data)
                     pos += written
+                    window_bytes += written
+                    task.downloaded_bytes += written
                     async with self.lock:
                         self.downloaded_bytes += written
+                    now = time.time()
+                    window_elapsed = max(now - window_start, 1e-6)
+                    if window_elapsed >= 0.5 or window_bytes >= 524288:
+                        avg_speed = window_bytes / window_elapsed
+                        task.last_speed_bps = avg_speed
+                        if (
+                            self.parent.chunk_retry_speed
+                            and avg_speed < self.parent.chunk_retry_speed
+                        ):
+                            raise SlowRangeError(
+                                task, avg_speed, self.parent.chunk_retry_speed
+                            )
+                        window_bytes = 0
+                        window_start = now
                     if self._per_task_limiter:
                         await self._per_task_limiter.acquire(written)
                     if self.parent._global_limiter:
@@ -799,8 +829,15 @@ class Downloader:
                 await self._download_range_task(task)
                 allocator.mark_completed(task)
             except Exception as e:
+                removed = task.discard_partial()
+                if removed:
+                    async with self.lock:
+                        self.downloaded_bytes = max(0, self.downloaded_bytes - removed)
                 if not allocator.mark_failed(task, str(e)):
                     raise
+                self._logger.debug(
+                    f"Requeued dynamic range {task.start}-{task.end} after failure: {e}"
+                )
                 await asyncio.sleep(self.parent.retry_wait)
 
     async def _start_dynamic_download(self) -> None:
