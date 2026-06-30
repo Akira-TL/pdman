@@ -89,6 +89,25 @@ def test_allocator_payload_includes_split_child_range(tmp_path):
     assert ranges[(3, 9)]["state"] == "pending"
 
 
+def test_allocator_payload_can_include_selector_diagnostics(tmp_path):
+    allocator = RangeAllocator(
+        file_size=8,
+        range_size=4,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    selector = {
+        "requested_mode": "auto",
+        "selected_mode": "dynamic",
+        "fallback_reason": None,
+        "reason": "dynamic_eligible",
+    }
+
+    payload = range_allocator_payload(allocator, selector=selector)
+
+    assert payload["selector"] == selector
+
+
 def test_write_range_metadata_writes_valid_json(tmp_path):
     allocator = RangeAllocator(
         file_size=4,
@@ -97,10 +116,17 @@ def test_write_range_metadata_writes_valid_json(tmp_path):
         filename="file.bin",
     )
     metadata_path = tmp_path / "dynamic-ranges.json"
+    selector = {
+        "requested_mode": "dynamic",
+        "selected_mode": "dynamic",
+        "fallback_reason": None,
+        "reason": "dynamic_eligible",
+    }
 
-    write_range_metadata(metadata_path, allocator)
+    write_range_metadata(metadata_path, allocator, selector=selector)
 
     payload = json.loads(metadata_path.read_text())
     assert payload["schema_version"] == DYNAMIC_RANGE_METADATA_SCHEMA_VERSION
     assert payload["mode"] == "dynamic"
+    assert payload["selector"] == selector
     assert payload["ranges"][0]["state"] == "pending"

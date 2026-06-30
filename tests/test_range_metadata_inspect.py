@@ -150,11 +150,19 @@ def test_filter_ranges_filters_failed_and_sorts_by_start():
 
 def test_summary_includes_filtered_ranges_and_counts():
     payload = metadata_payload()
+    selector = {
+        "requested_mode": "auto",
+        "selected_mode": "dynamic",
+        "fallback_reason": None,
+        "reason": "dynamic_eligible",
+    }
+    payload["selector"] = selector
 
     summary = range_metadata_summary(payload, state="completed")
 
     assert summary["schema_version"] == 1
     assert summary["mode"] == "dynamic"
+    assert summary["selector"] == selector
     assert summary["filter"] == {"state": "completed"}
     assert summary["count"] == 2
     assert summary["state_counts"] == {
@@ -183,9 +191,16 @@ def test_format_readable_shows_stats_and_failed_error(tmp_path):
 
 def test_format_readable_state_filter_shows_matching_ranges():
     payload = metadata_payload()
+    payload["selector"] = {
+        "requested_mode": "auto",
+        "selected_mode": "dynamic",
+        "fallback_reason": None,
+        "reason": "dynamic_eligible",
+    }
 
     output = format_range_metadata(payload, state="completed")
 
+    assert "selector: requested=auto selected=dynamic reason=dynamic_eligible fallback_reason=None" in output
     assert "Ranges state=completed:" in output
     assert "#0 0-1023 state=completed attempts=1 bytes=1024/1024 speed=2048.00B/s" in output
     assert "#1 1024-2047 state=completed attempts=1 bytes=1024/1024 speed=1024.50B/s" in output

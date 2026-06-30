@@ -418,6 +418,39 @@ def test_dynamic_failed_download_with_keep_tmp_retains_range_metadata(tmp_path):
         assert manager.exit_code == 1
 
 
+def test_auto_segment_download_metadata_includes_selector_diagnostics(tmp_path):
+    with LocalDownloadServer() as server:
+        tmp_root = tmp_path / "tmp"
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="auto",
+            retry=0,
+            tmp_dir=str(tmp_root),
+            keep_tmp=True,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/bad-content-range.bin"),
+            file_name="auto-selector-metadata.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        metadata_files = list(tmp_root.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
+        assert len(metadata_files) == 1
+        payload = json.loads(metadata_files[0].read_text())
+        assert payload["selector"] == {
+            "requested_mode": "auto",
+            "selected_mode": "dynamic",
+            "fallback_reason": None,
+            "reason": "dynamic_eligible",
+        }
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.exit_code == 1
+
+
 def test_dynamic_segment_download_rejects_ignored_range_response(tmp_path):
     with LocalDownloadServer() as server:
         manager = Manager(

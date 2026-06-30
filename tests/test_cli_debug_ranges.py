@@ -96,13 +96,22 @@ def test_cli_debug_ranges_state_filter(tmp_path, capsys):
 
 
 def test_cli_debug_ranges_json(tmp_path, capsys):
-    metadata_path = write_metadata(tmp_path)
+    metadata = metadata_payload()
+    selector = {
+        "requested_mode": "auto",
+        "selected_mode": "dynamic",
+        "fallback_reason": None,
+        "reason": "dynamic_eligible",
+    }
+    metadata["selector"] = selector
+    metadata_path = write_metadata(tmp_path, metadata)
 
     exit_code = cli.main(["debug", "ranges", str(metadata_path), "--state", "failed", "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["filter"] == {"state": "failed"}
+    assert payload["selector"] == selector
     assert payload["count"] == 1
     assert payload["ranges"][0]["index"] == 1
     assert payload["stats"]["failed_count"] == 1
