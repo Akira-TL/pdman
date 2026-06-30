@@ -24,6 +24,28 @@ def queue_records_payload(records: list[QueueRecord], key: str = "records") -> d
     return {key: serialized, "count": len(serialized)}
 
 
+def queue_add_payload(records: list[QueueRecord]) -> dict[str, Any]:
+    payload = queue_records_payload(records)
+    payload["added"] = payload["count"]
+    return payload
+
+
+def queue_repair_payload(stats: dict[str, int]) -> dict[str, Any]:
+    return dict(stats)
+
+
+def queue_recover_payload(recovered: int) -> dict[str, Any]:
+    return {"recovered": recovered}
+
+
+def queue_remove_payload(queue_ids: list[str], removed: int) -> dict[str, Any]:
+    return {"requested": queue_ids, "removed": removed}
+
+
+def queue_clear_payload(cleared: int, status: str | None, all_records: bool) -> dict[str, Any]:
+    return {"cleared": cleared, "status": status, "all": all_records}
+
+
 def validation_report_payload(report: QueueValidationReport) -> dict[str, Any]:
     return {
         "ok": report.ok,
