@@ -413,6 +413,8 @@ def test_rebuild_task_does_not_fallback_to_legacy_pdm_after_v2_rejection(tmp_pat
         downloader._logger = SimpleNamespace(warning=warnings.append)
 
         assert await downloader.rebuild_task() is None
+        assert downloader.resume_rejection_code == "url_mismatch"
+        assert downloader.resume_rejection_reason.startswith("Resume rejected [url_mismatch]")
         assert not partial_path.exists()
         assert any("Resume rejected [url_mismatch]" in item for item in warnings)
         assert not any("Legacy .pdm resume fallback" in item for item in warnings)

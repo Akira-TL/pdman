@@ -79,6 +79,28 @@ def test_manager_summary_counts_task_results():
     assert manager.exit_code == 1
 
 
+def test_manager_summary_shows_resume_rejection_visibility():
+    manager = Manager(log_path=None)
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+            resume_rejection_code="file_size_mismatch",
+            resume_rejection_reason="Resume rejected [file_size_mismatch]: file_size mismatch",
+        )
+    )
+
+    summary = manager.summarize_results()
+
+    assert "Resume:" in summary
+    assert "ok.bin - Resume rejected [file_size_mismatch]: file_size mismatch" in summary
+    assert manager.exit_code == 0
+
+
 def test_manager_writes_run_metadata_and_history(tmp_path):
     manager = Manager(
         log_path=None,
@@ -115,6 +137,8 @@ def test_manager_writes_run_metadata_and_history(tmp_path):
     history_record = json.loads(history[0])
     assert history_record["status"] == "completed"
     assert history_record["filename"] == "ok.bin"
+    assert history_record["resume_rejection_code"] is None
+    assert history_record["resume_rejection_reason"] is None
     assert final_run["tmp_cleanup"] == {
         "policy": "cleanup_on_finish",
         "kept": False,
