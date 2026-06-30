@@ -336,6 +336,8 @@ pdman queue list
 pdman queue list --status pending
 pdman queue start
 pdman queue start --limit 5
+pdman queue retry-failed
+pdman queue retry-failed --limit 5
 pdman queue validate
 pdman queue repair
 pdman queue recover
@@ -358,7 +360,8 @@ queue record schema：
   "created_at": "...",
   "updated_at": "...",
   "last_run_id": null,
-  "last_error": null
+  "last_error": null,
+  "attempts": 0
 }
 ```
 
@@ -373,6 +376,8 @@ queue status：
 | `failed` | 最近一次执行失败 |
 
 `queue start` 会读取 queue 中的任务，真实创建 `Manager` 并执行下载，然后根据 `Manager.results` 更新 queue 状态。测试使用本地 HTTP server 覆盖成功下载和 HTTP 失败路径，不使用 mock Manager。
+
+v0.4.5 增加 `attempts` 字段和 `queue retry-failed`。每次 queue record 被 `queue start` 或 `queue retry-failed` 取出执行时，`attempts += 1`。`retry-failed` 只选取 `failed` 记录，成功后写回 `completed` 且清空 `last_error`，失败后保持 `failed` 并更新 `last_error`。`queue start --status failed` 仍保留，但文档主推 `queue retry-failed`。
 
 v0.4.4 加固内容：
 
@@ -390,7 +395,7 @@ v0.4.4 加固内容：
 | `queue remove` | 按 queue_id 删除记录 |
 | `queue clear` | 按状态或 `--all` 清理记录 |
 
-限制：v0.4.4 不提供 retry-failed、优先级、daemon、SQLite、网络文件系统强一致锁或 agent event stream。
+限制：v0.4.5 不提供自动 retry scheduler、max-attempts policy、backoff、优先级、daemon、SQLite、网络文件系统强一致锁或 agent event stream。
 
 ---
 
