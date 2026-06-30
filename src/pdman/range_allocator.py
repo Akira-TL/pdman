@@ -6,6 +6,36 @@ from pathlib import Path
 from .range_task import RangeTask
 
 
+DYNAMIC_RANGE_ALIGNMENT = 64 * 1024
+
+
+def _align_down(value: int, alignment: int = DYNAMIC_RANGE_ALIGNMENT) -> int:
+    if value < alignment:
+        return value
+    return value - (value % alignment)
+
+
+def choose_dynamic_range_size(
+    *,
+    file_size: int,
+    min_split_size: int,
+    worker_count: int,
+    target_ranges_per_worker: int = 4,
+) -> int:
+    if file_size <= 0:
+        raise ValueError("file_size must be positive")
+    if min_split_size <= 0:
+        raise ValueError("min_split_size must be positive")
+    if worker_count <= 0:
+        raise ValueError("worker_count must be positive")
+    if target_ranges_per_worker <= 0:
+        raise ValueError("target_ranges_per_worker must be positive")
+    target_range_count = worker_count * target_ranges_per_worker
+    base_size = max(1, file_size // target_range_count)
+    range_size = max(min_split_size, base_size)
+    return max(min_split_size, _align_down(range_size))
+
+
 class RangeAllocator:
     def __init__(
         self,
@@ -23,7 +53,7 @@ class RangeAllocator:
         if max_retries < 0:
             raise ValueError("max_retries cannot be negative")
         self.file_size = file_size
-        self.range_size = range_size
+        self.range_size = min(range_size, file_size)
         self.tmp_dir = Path(tmp_dir)
         self.filename = filename
         self.max_retries = max_retries
@@ -66,6 +96,26 @@ class RangeAllocator:
         if task not in self.failed:
             self.failed.append(task)
         return False
+
+    @property
+    def total_ranges(self) -> int:
+        return len(self.ranges)
+
+    @property
+    def pending_count(self) -> int:
+        return len(self._pending)
+
+    @property
+    def active_count(self) -> int:
+        return len(self._active)
+
+    @property
+    def completed_count(self) -> int:
+        return len(self.completed)
+
+    @property
+    def failed_count(self) -> int:
+        return len(self.failed)
 
     @property
     def done(self) -> bool:
