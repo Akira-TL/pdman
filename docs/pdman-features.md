@@ -215,9 +215,12 @@ pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json
 pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --state failed
 pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --json
 pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --jsonl
+pdman debug ranges --latest
+pdman debug ranges --latest --state failed --json
+pdman debug ranges --latest --search-root /path/to/tmp --jsonl
 ```
 
-默认输出 readable 诊断摘要；`--json` 输出包含 `filter`、`stats`、`state_counts` 和过滤后 `ranges` 的结构化 payload；`--jsonl` 每个 range 输出一行 JSON，方便脚本和 agent 管道消费。`--state` 支持 `pending`、`active`、`completed`、`failed`、`unknown`。v0.5.8 起，metadata 可包含向后兼容的 `selector` 诊断对象，记录 `requested_mode`、`selected_mode`、`reason` 和 `fallback_reason`；`pdman debug ranges --json` 会保留该字段，readable 输出也会显示 selector 摘要。metadata 写入改为原子替换，降低多 worker 同时更新 debug JSON 时产生损坏文件的风险。该命令只读取 v0.5.5+ 的 dynamic debug metadata，不恢复下载、不修改 metadata 或下载文件，也不保证跨大版本 metadata 兼容。
+默认输出 readable 诊断摘要；`--json` 输出包含 `filter`、`stats`、`state_counts`、`source_path` 和过滤后 `ranges` 的结构化 payload；`--jsonl` 每个 range 输出一行 JSON，方便脚本和 agent 管道消费。`--state` 支持 `pending`、`active`、`completed`、`failed`、`unknown`。v0.5.8 起，metadata 可包含向后兼容的 `selector` 诊断对象，记录 `requested_mode`、`selected_mode`、`reason` 和 `fallback_reason`；`pdman debug ranges --json` 会保留该字段，readable 输出也会显示 selector 摘要。metadata 写入改为原子替换，降低多 worker 同时更新 debug JSON 时产生损坏文件的风险。v0.5.9 起，`--latest` 会从默认系统 tmp root、cache root 以及额外 `--search-root` 中递归查找最新的有效 `dynamic-ranges.json`；如果使用了显式 `--tmp` 或 target tmp，建议把对应目录传给 `--search-root`。该命令只读取 v0.5.5+ 的 dynamic debug metadata，不恢复下载、不修改 metadata 或下载文件，也不保证跨大版本 metadata 兼容。
 
 v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 

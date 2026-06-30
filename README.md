@@ -154,9 +154,12 @@ pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json
 pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --state failed
 pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --json
 pdman debug ranges /tmp/pdman-xxx/dynamic-ranges.json --jsonl
+pdman debug ranges --latest
+pdman debug ranges --latest --state failed --json
+pdman debug ranges --latest --search-root /path/to/tmp --jsonl
 ```
 
-`pdman debug ranges` 只读取 v0.5.5+ 的 dynamic debug metadata；不会恢复下载，不会修改 metadata 或下载文件，也不承诺跨大版本 metadata 兼容。
+`pdman debug ranges` 只读取 v0.5.5+ 的 dynamic debug metadata；不会恢复下载，不会修改 metadata 或下载文件，也不承诺跨大版本 metadata 兼容。v0.5.9 起，`--latest` 会从默认系统 tmp root、cache root 以及额外 `--search-root` 中递归查找最新的有效 `dynamic-ranges.json`；如果使用了显式 `--tmp` 或 target tmp，建议把对应目录传给 `--search-root`。
 
 ### 重试与超时
 
