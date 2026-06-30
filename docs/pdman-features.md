@@ -50,6 +50,7 @@
 | `-x, --max-concurrent-downloads INT` | 单个 URL 内部最大分块并发数 |
 | `-Z, --force-sequential` | 强制顺序下载 |
 | `-k, --min-split-size SIZE` | 最小分块大小，支持 `K` / `M` 后缀 |
+| `--segment-mode static|dynamic` | 分段模式；默认 `static`，`dynamic` 为 v0.5.0 实验性 range allocator 模式 |
 | `--max-connection-per-server INT` | 单服务器最大连接数；`0` 表示不限制 |
 | `-c, --continue` | 启用断点续传 |
 | `--tmp DIR` | 指定分块临时文件根目录 |
@@ -144,6 +145,7 @@ https://example.com/a.iso:
 ```yaml
 max_downloads: 4
 max_concurrent_downloads: 8
+segment_mode: static
 retry: 5
 retry_wait: 3
 timeout: 120
@@ -161,7 +163,31 @@ summary_interval: 1.0
 
 ---
 
-## 5. 回调命令
+## 5. 分段下载模式
+
+v0.5.0 引入显式分段模式参数：
+
+```bash
+pdman --segment-mode static "https://example.com/file.bin"
+pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
+```
+
+| 模式 | 行为 |
+| --- | --- |
+| `static` | 默认行为，保留原有静态 chunk slicing 和中途拆分路径 |
+| `dynamic` | 实验性动态 range allocator；按 `--min-split-size` 生成 ranges，多 worker 反复领取 range，完成后按 offset 合并 |
+
+`dynamic` 模式只在文件大小已知、服务端声明 `Accept-Ranges: bytes` 且未启用 `--continue` 时使用。以下情况会回退到 `static` 路径：
+
+- 文件大小未知。
+- 服务端未声明 `Accept-Ranges: bytes`。
+- 用户启用了 `--continue`。
+
+v0.5.0 的 dynamic mode 是基础实现，不包含 adaptive range size、慢 worker 拆分、dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
+
+---
+
+## 6. 回调命令
 
 `--on-download-complete` 支持以下占位符：
 
@@ -184,7 +210,7 @@ pdman --on-download-complete "echo Downloaded {filename} to {filepath}" \
 
 ---
 
-## 6. 任务状态、结果汇总与退出码
+## 7. 任务状态、结果汇总与退出码
 
 v0.3.3 引入运行时任务结果模型，用于区分任务是完成、按用户策略跳过，还是失败后继续批处理。
 
@@ -210,7 +236,7 @@ v0.3.3 引入运行时任务结果模型，用于区分任务是完成、按用�
 | `1` | 一个或多个任务 failed |
 | `130` | 用户中断 |
 
-### 6.1 v0.3.3 手动验证说明
+### 7.1 v0.3.3 手动验证说明
 
 本节记录维护者手动执行的 v0.3.3 验证项，用来补充自动化测试。保留这些用例的目的是明确确认 CLI 退出码传递和 MD5 mismatch 失败语义。
 
@@ -229,7 +255,7 @@ uv run pdman --version
 
 ---
 
-## 7. Runtime 目录、history 与 current run
+## 8. Runtime 目录、history 与 current run
 
 v0.4.0 引入 runtime 目录管理，目标是把 payload 临时文件和非 payload 元数据分开：
 
@@ -299,7 +325,7 @@ final run metadata 会写入 `tmp_cleanup`：
 
 v0.4.x 只提供 runtime 目录和 history/current-run 基础，不提供 queue 命令、daemon 模式、JSON/JSONL 输出或 agent event stream。这些内容放到后续 0.4.x/0.9.x 修订版本。
 
-### 7.1 History 查询命令
+### 8.1 History 查询命令
 
 v0.4.1 提供只读查询命令，用于查看 `history.jsonl` 和 `runs/<run-id>.json`：
 
@@ -318,7 +344,7 @@ pdman run <run-id>
 
 v0.4.1 不提供 history 删除、时间范围过滤、active run 查询或 retry failed。
 
-### 7.2 Queue foundation
+### 8.2 Queue foundation
 
 v0.4.3 引入本地 JSONL 队列基础：
 
@@ -450,7 +476,7 @@ v0.4.4 加固内容：
 
 ---
 
-## 8. 内部配置链路
+## 9. 内部配置链路
 
 当前 CLI 到下载执行的大致链路为：
 
@@ -480,7 +506,7 @@ Downloader.merge()
 
 ---
 
-## 9. 本地开发环境
+## 10. 本地开发环境
 
 推荐使用 `uv`：
 
@@ -513,7 +539,7 @@ uv run python -m twine check dist/*
 
 ---
 
-## 10. 发布前检查
+## 11. 发布前检查
 
 发布前至少完成以下检查：
 
@@ -555,7 +581,7 @@ GitHub Release 发布后，`.github/workflows/pypi.yml` 会触发自动构建并
 
 ---
 
-## 11. 文档维护原则
+## 12. 文档维护原则
 
 - `README.md` 只放面向用户的安装、快速开始、常用命令和项目约定。
 - `docs/` 放更完整的功能说明、内部链路、开发与发布检查。

@@ -10,7 +10,7 @@
 
 - **多连接分块下载**：通过 HTTP Range 请求将同一 URL 拆分为多个分块并发下载。
 - **断点续传**：使用 `.pdman.<sha>` 临时目录保存分块和元信息，可通过 `--continue` 恢复下载。
-- **动态分块调度**：下载过程中可继续拆分较大的空闲区间，提高连接利用率。
+- **动态分块调度**：默认 static 模式保留原有中途拆分能力；v0.5.0 起可用 `--segment-mode dynamic` 启用实验性 range allocator。
 - **低速分片重启**：通过 `--chunk-retry-speed` 检测低速分块并自动重试，避免单个连接拖慢整体任务。
 - **批量任务**：支持从纯文本、JSON、YAML 文件读取多个下载任务。
 - **并发控制**：支持任务级并发、单 URL 分块并发、单服务器连接数限制。
@@ -139,6 +139,14 @@ pdman -N 4 -x 8 "https://example.com/file.bin"
 - `-k, --min-split-size`：最小分块大小，例如 `1M`、`512K`。
 - `--max-connection-per-server`：单服务器最大连接数，`0` 表示不限制。
 - `-Z, --force-sequential`：强制顺序下载。
+
+v0.5.0 开始提供实验性的动态分段模式。默认仍是兼容旧行为的 static 模式；需要显式启用 dynamic：
+
+```bash
+pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
+```
+
+`--segment-mode dynamic` 会使用 range allocator 把文件按 `--min-split-size` 拆成可领取的 ranges，多 worker 持续领取 range 并按 offset 合并。v0.5.0 暂不做 adaptive range size、慢 worker 拆分、dynamic resume 或默认启用 dynamic；未知文件大小、`--continue` 或服务端未声明 `Accept-Ranges: bytes` 时会回退到 static 路径。
 
 ### 重试与超时
 
