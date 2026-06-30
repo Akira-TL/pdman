@@ -2,6 +2,7 @@ import json
 
 from pdman.output import (
     print_jsonl,
+    resume_rejection_payload,
     queue_add_payload,
     queue_clear_payload,
     queue_records_payload,
@@ -11,6 +12,41 @@ from pdman.output import (
     validation_report_payload,
 )
 from pdman.queue import QueueRecord, QueueValidationIssue, QueueValidationReport
+from pdman.status import TaskResult, TaskStatus
+
+
+def test_resume_rejection_payload_from_task_result():
+    result = TaskResult(
+        url="https://example.com/file.bin",
+        filename="file.bin",
+        status=TaskStatus.COMPLETED,
+        resume_rejection_code="file_size_mismatch",
+        resume_rejection_reason="Resume rejected [file_size_mismatch]: file_size mismatch",
+    )
+
+    assert resume_rejection_payload(result) == {
+        "present": True,
+        "code": "file_size_mismatch",
+        "reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+    }
+
+
+def test_resume_rejection_payload_from_history_record_and_empty_record():
+    record = {
+        "resume_rejection_code": "url_mismatch",
+        "resume_rejection_reason": "Resume rejected [url_mismatch]: url mismatch",
+    }
+
+    assert resume_rejection_payload(record) == {
+        "present": True,
+        "code": "url_mismatch",
+        "reason": "Resume rejected [url_mismatch]: url mismatch",
+    }
+    assert resume_rejection_payload({}) == {
+        "present": False,
+        "code": None,
+        "reason": None,
+    }
 
 
 def test_queue_records_payload_includes_count_and_records():
