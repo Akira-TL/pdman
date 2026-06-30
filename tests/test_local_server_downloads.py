@@ -72,6 +72,26 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                 return
             self._send_payload(PAYLOAD, "flaky.bin", send_body)
             return
+        if parsed.path == "/flaky-range.bin":
+            range_header = self.headers.get("Range")
+            if send_body and range_header:
+                key = f"{parsed.path}:{range_header}"
+                FLAKY_COUNTS[key] = FLAKY_COUNTS.get(key, 0) + 1
+                if FLAKY_COUNTS[key] == 1:
+                    self._send_text(503, b"flaky range first failure")
+                    return
+            self._send_payload(PAYLOAD, "flaky-range.bin", send_body)
+            return
+        if parsed.path == "/slow-range-once.bin":
+            range_header = self.headers.get("Range")
+            if send_body and range_header:
+                key = f"{parsed.path}:{range_header}"
+                FLAKY_COUNTS[key] = FLAKY_COUNTS.get(key, 0) + 1
+                if FLAKY_COUNTS[key] == 1:
+                    self._send_slow_payload(PAYLOAD, "slow-range-once.bin", send_body)
+                    return
+            self._send_payload(PAYLOAD, "slow-range-once.bin", send_body)
+            return
         self._send_text(404, b"not found")
 
     def _send_text(self, status: int, body: bytes):
@@ -81,12 +101,12 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _send_payload(self, data: bytes, filename: str, send_body: bool):
+    def _payload_range(self, data: bytes):
         range_header = self.headers.get("Range")
         status = 200
         start = 0
         end = len(data) - 1
-        if send_body and range_header:
+        if self.command != "HEAD" and range_header:
             unit, raw_range = range_header.split("=", 1)
             assert unit == "bytes"
             raw_start, raw_end = raw_range.split("-", 1)
@@ -94,8 +114,10 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
             end = int(raw_end) if raw_end else len(data) - 1
             end = min(end, len(data) - 1)
             status = 206
+        return status, start, end, data[start:end + 1]
 
-        body = data[start:end + 1]
+    def _send_payload(self, data: bytes, filename: str, send_body: bool):
+        status, start, end, body = self._payload_range(data)
         self.send_response(status)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
@@ -105,6 +127,21 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if send_body:
             self.wfile.write(body)
+
+    def _send_slow_payload(self, data: bytes, filename: str, send_body: bool):
+        status, start, end, body = self._payload_range(data)
+        self.send_response(status)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(body)))
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+        self.end_headers()
+        if send_body:
+            for index in range(0, len(body), 512):
+                self.wfile.write(body[index:index + 512])
+                self.wfile.flush()
+                time.sleep(0.05)
 
     def _send_unknown_size(self, send_body: bool):
         self.send_response(200)
@@ -229,6 +266,78 @@ def test_dynamic_segment_download_handles_uneven_file_with_four_workers(tmp_path
         asyncio.run(manager.download())
 
         assert (tmp_path / "dynamic-uneven.bin").read_bytes() == UNEVEN_PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_dynamic_segment_download_recovers_flaky_ranges(tmp_path):
+    FLAKY_COUNTS.clear()
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=3,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            retry=1,
+            retry_wait=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/flaky-range.bin"),
+            file_name="dynamic-flaky-range.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "dynamic-flaky-range.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_dynamic_segment_download_fails_after_range_retry_limit(tmp_path):
+    FLAKY_COUNTS.clear()
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/flaky-range.bin"),
+            file_name="dynamic-range-failed.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "dynamic-range-failed.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.exit_code == 1
+
+
+def test_dynamic_segment_download_recovers_slow_range_once(tmp_path):
+    FLAKY_COUNTS.clear()
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            retry=1,
+            retry_wait=0,
+            chunk_retry_speed="10M",
+            log_path=None,
+        )
+        manager.append(
+            server.url("/slow-range-once.bin"),
+            file_name="dynamic-slow-range.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "dynamic-slow-range.bin").read_bytes() == PAYLOAD
         assert manager.results[0].status == TaskStatus.COMPLETED
         assert manager.exit_code == 0
 
