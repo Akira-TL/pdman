@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
+RESUME_METADATA_FILENAME = "resume-metadata.json"
 RESUME_METADATA_SCHEMA_VERSION = 2
 RESUME_METADATA_KIND = "resume"
 RESUME_METADATA_MODES = {"static", "dynamic"}
@@ -143,6 +144,59 @@ def validate_resume_metadata(
                     f"index={segment['index']} existing_size={segment['existing_size']} "
                     f"expected_size={segment['expected_size']}"
                 )
+
+
+def static_resume_metadata_payload(
+    *,
+    url: str,
+    filename: str,
+    target_path: str | Path,
+    file_size: int,
+    chunks: list[Any],
+    etag: str | None = None,
+    last_modified: str | None = None,
+    created_at: str | None = None,
+    updated_at: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": RESUME_METADATA_SCHEMA_VERSION,
+        "kind": RESUME_METADATA_KIND,
+        "mode": "static",
+        "url": url,
+        "filename": filename,
+        "target_path": str(target_path),
+        "file_size": file_size,
+        "etag": etag,
+        "last_modified": last_modified,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "segments": [
+            _chunk_resume_segment_payload(index, chunk)
+            for index, chunk in enumerate(chunks)
+        ],
+    }
+    validate_resume_metadata(payload)
+    return payload
+
+
+def _chunk_resume_segment_payload(index: int, chunk: Any) -> dict[str, Any]:
+    start = int(chunk.start)
+    end = int(chunk.end)
+    expected_size = end - start + 1
+    path = Path(chunk.chunk_path)
+    try:
+        existing_size = path.stat().st_size
+    except OSError:
+        existing_size = 0
+    return {
+        "index": index,
+        "start": start,
+        "end": end,
+        "path": str(path),
+        "expected_size": expected_size,
+        "existing_size": existing_size,
+        "state": _state_for_existing_size(existing_size, expected_size),
+    }
 
 
 def inspect_resume_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
