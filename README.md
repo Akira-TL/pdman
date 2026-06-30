@@ -171,6 +171,8 @@ v0.6.3 起，resume metadata 被拒绝时会带稳定 reason code，并使用类
 
 v0.6.4 起，缺失 `resume-metadata.json` 但存在旧 `.pdm` 时，pdman 仍会兼容恢复，但会输出 legacy fallback warning。若 `resume-metadata.json` 存在但被拒绝，pdman 会清理旧 tmp 并重新开始，不会退回 `.pdm`，避免绕过 v2 的严格拒绝原因。
 
+v0.6.5 起，static resume rejection 会进入 `TaskResult`、runtime history 和 human summary 的 `Resume:` 小节，方便用户看到本次任务为什么没有复用旧 tmp。该可见性不改变 exit code，不新增专门的 JSON/JSONL resume diagnostics，也不启用 dynamic recovery。
+
 ### 重试与超时
 
 ```bash

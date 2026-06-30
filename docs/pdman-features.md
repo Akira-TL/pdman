@@ -269,6 +269,8 @@ v0.6.3 为 resume rejection 增加稳定 reason code 和统一可读日志，例
 
 v0.6.4 开始收紧 legacy fallback 边界：缺失 `resume-metadata.json` 时仍允许 `.pdm` 兼容恢复，但会输出 warning，提醒这是旧兼容路径。若 v2 metadata 存在但校验拒绝，不会再退回 `.pdm`，而是清理旧 tmp 并重新开始，避免旧 fallback 绕过严格的 URL、target、file size、etag、last-modified 和 partial size 检查。
 
+v0.6.5 将 static resume rejection 提升到用户可见层：`TaskResult`、runtime history 和 human summary 都会记录拒绝原因，summary 中会出现 `Resume:` 小节。该版本只改善可见性，不改变 exit code，不新增专门 JSON/JSONL resume 输出，也不启用 dynamic recovery。
+
 ---
 
 ## 6. 回调命令
