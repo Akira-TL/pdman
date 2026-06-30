@@ -215,16 +215,20 @@ v0.4.0 开始，pdman 默认把分块临时文件放在系统临时目录下的 
 
 ```bash
 pdman --tmp-policy auto   "https://example.com/file.bin"
+pdman --tmp-policy system "https://example.com/file.bin"
 pdman --tmp-policy target "https://example.com/file.bin"
 pdman --tmp /data/tmp     "https://example.com/file.bin"
 pdman --cache-dir /data/cache/pdman "https://example.com/file.bin"
+pdman --keep-tmp          "https://example.com/file.bin"
 ```
 
 - `--tmp` 优先级最高。
-- `--tmp-policy auto` 是默认值，优先使用系统临时目录。
-- `--tmp-policy system` 强制使用系统临时目录。
+- `--tmp-policy auto` 是默认值，优先使用系统临时目录；已知大小且空间不足时回退到目标目录。
+- `--tmp-policy system` 强制使用系统临时目录；空间不足会把任务标记为 `failed`。
 - `--tmp-policy target` 保留旧行为，在目标目录旁创建 `.pdman.<sha>`。
+- `--tmp DIR` 是显式指定，不会在空间不足时偷偷回退。
 - `--cache-dir` 覆盖默认 `~/.cache/pdman`。
+- `--keep-tmp` 会在 run failed 或中断时保留 runtime tmp 目录，便于 debug 和人工恢复；它不是稳定的 resume metadata 接口。
 
 ### 历史查询命令
 

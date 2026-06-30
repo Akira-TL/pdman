@@ -264,15 +264,40 @@ v0.4.0 引入 runtime 目录管理，目标是把 payload 临时文件和非 pay
 
 | 参数 | 行为 |
 | --- | --- |
-| `--tmp DIR` | 最高优先级，使用用户指定目录下的 `.pdman.<task-id>` |
-| `--tmp-policy auto` | 默认，优先使用系统临时目录；空间不足时回退到目标目录 |
-| `--tmp-policy system` | 强制使用系统临时目录 |
+| `--tmp DIR` | 最高优先级，使用用户指定目录下的 `.pdman.<task-id>`；空间不足时 failed，不自动回退 |
+| `--tmp-policy auto` | 默认，优先使用系统临时目录；已知文件大小且空间不足时回退到目标目录 |
+| `--tmp-policy system` | 强制使用系统临时目录；空间不足时 failed |
 | `--tmp-policy target` | 保留 v0.3.x 行为，在目标目录创建 `.pdman.<task-id>` |
 | `--cache-dir DIR` | 覆盖默认 `~/.cache/pdman` |
+| `--keep-tmp` | run failed 或 interrupted 时保留 runtime tmp 目录 |
 
 兼容性说明：启用 `--continue` 且目标目录中存在旧版 `.pdman.<task-id>/.pdm` 时，pdman 会优先使用旧目录继续下载，避免破坏 v0.3.x 已存在的续传状态。
 
-v0.4.0 只提供 runtime 目录和 history/current-run 基础，不提供 queue 命令、daemon 模式、JSON/JSONL 输出或 agent event stream。这些内容放到后续 0.4.x/0.9.x 修订版本。
+v0.4.2 对已知大小任务执行 tmp 空间检查。检查使用文件大小加固定安全余量，避免刚好够用但实际写入失败。未知大小任务仍会使用 system tmp，因为无法提前估算空间需求。
+
+当 tmp 空间不足时，history 会记录明确原因：
+
+| reason_code | 含义 |
+| --- | --- |
+| `tmp_space_insufficient` | 临时目录空间不足 |
+| `tmp_dir_create_failed` | 临时目录创建失败 |
+
+final run metadata 会写入 `tmp_cleanup`：
+
+```json
+{
+  "tmp_cleanup": {
+    "policy": "cleanup_on_finish",
+    "kept": false,
+    "run_dir": "/tmp/pdman/runs/<run-id>",
+    "error": null
+  }
+}
+```
+
+`--keep-tmp` 只用于 debug 和人工恢复。它不是稳定的 resume metadata 接口；严格 resume 仍放在 v0.6.x。
+
+v0.4.x 只提供 runtime 目录和 history/current-run 基础，不提供 queue 命令、daemon 模式、JSON/JSONL 输出或 agent event stream。这些内容放到后续 0.4.x/0.9.x 修订版本。
 
 ### 7.1 History 查询命令
 
