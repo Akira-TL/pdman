@@ -111,6 +111,51 @@ def test_dynamic_resume_metadata_payload_serializes_range_tasks(tmp_path):
     validate_resume_metadata(payload)
 
 
+def test_dynamic_resume_metadata_payload_preserves_split_range_layout(tmp_path):
+    allocator = RangeAllocator(
+        file_size=2048,
+        range_size=2048,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    task = allocator.claim_next()
+    assert task is not None
+    task.path.write_bytes(b"x" * 512)
+
+    child = allocator.split_remaining(task, min_size=128)
+    assert child is not None
+
+    payload = dynamic_resume_metadata_payload(
+        url="https://example.invalid/file.bin",
+        filename="file.bin",
+        target_path=tmp_path / "file.bin",
+        file_size=2048,
+        allocator=allocator,
+    )
+
+    assert payload["segments"] == [
+        {
+            "index": 0,
+            "start": 0,
+            "end": 511,
+            "path": str(task.path),
+            "expected_size": 512,
+            "existing_size": 512,
+            "state": "completed",
+        },
+        {
+            "index": 1,
+            "start": 512,
+            "end": 2047,
+            "path": str(child.path),
+            "expected_size": 1536,
+            "existing_size": 0,
+            "state": "pending",
+        },
+    ]
+    validate_resume_metadata(payload)
+
+
 def test_static_resume_metadata_payload_serializes_chunk_chain(tmp_path):
     first_path = tmp_path / "file.bin.0"
     second_path = tmp_path / "file.bin.1024"
