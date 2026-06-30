@@ -1,7 +1,7 @@
 import json
 
 import pdman.cli as cli
-from pdman.queue import load_queue, queue_path, rewrite_queue
+from pdman.queue import QueueRecord, load_queue, queue_path, rewrite_queue
 
 
 def test_cli_queue_add_url_and_list(tmp_path, capsys):
@@ -102,6 +102,71 @@ def test_cli_queue_list_status_and_attempt_filters(tmp_path, capsys):
     assert "c.bin" not in output
 
 
+def test_cli_queue_list_json_and_jsonl(tmp_path, capsys):
+    records = [
+        QueueRecord(
+            queue_id="q1",
+            url="https://example.com/a.bin",
+            file_name="a.bin",
+            status="failed",
+            attempts=1,
+            last_error="HTTP 503 during header check",
+        ),
+        QueueRecord(
+            queue_id="q2",
+            url="https://example.com/b.bin",
+            file_name="b.bin",
+            status="failed",
+            attempts=3,
+            last_error="Connection timed out",
+        ),
+        QueueRecord(
+            queue_id="q3",
+            url="https://example.com/c.bin",
+            file_name="c.bin",
+            status="completed",
+            attempts=4,
+        ),
+    ]
+    rewrite_queue(records, str(tmp_path))
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "list",
+            "--cache-dir",
+            str(tmp_path),
+            "--status",
+            "failed",
+            "--attempts-ge",
+            "3",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["count"] == 1
+    assert payload["records"][0]["queue_id"] == "q2"
+    assert payload["records"][0]["attempts"] == 3
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "list",
+            "--cache-dir",
+            str(tmp_path),
+            "--status",
+            "failed",
+            "--jsonl",
+        ]
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert [json.loads(line)["queue_id"] for line in lines] == ["q1", "q2"]
+
+
 def test_cli_queue_start_no_pending_returns_zero(tmp_path, capsys):
     exit_code = cli.main(["queue", "start", "--cache-dir", str(tmp_path)])
 
@@ -191,6 +256,75 @@ def test_cli_queue_retry_failed_dry_run_does_not_mutate_queue(tmp_path, capsys):
     assert after[1].attempts == 3
 
 
+def test_cli_queue_retry_failed_dry_run_json_and_jsonl(tmp_path, capsys):
+    records = [
+        QueueRecord(
+            queue_id="q1",
+            url="https://example.com/a.bin",
+            file_name="a.bin",
+            status="failed",
+            attempts=1,
+            last_error="HTTP 503 during header check",
+        ),
+        QueueRecord(
+            queue_id="q2",
+            url="https://example.com/b.bin",
+            file_name="b.bin",
+            status="failed",
+            attempts=3,
+            last_error="Connection timed out",
+        ),
+    ]
+    rewrite_queue(records, str(tmp_path))
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "retry-failed",
+            "--cache-dir",
+            str(tmp_path),
+            "--dry-run",
+            "--max-attempts",
+            "3",
+            "--error-contains",
+            "503",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["count"] == 1
+    assert payload["candidates"][0]["queue_id"] == "q1"
+    assert payload["candidates"][0]["last_error"] == "HTTP 503 during header check"
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "retry-failed",
+            "--cache-dir",
+            str(tmp_path),
+            "--dry-run",
+            "--jsonl",
+        ]
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert [json.loads(line)["queue_id"] for line in lines] == ["q1", "q2"]
+
+
+def test_cli_queue_retry_failed_json_requires_dry_run(tmp_path, capsys):
+    exit_code = cli.main(
+        ["queue", "retry-failed", "--cache-dir", str(tmp_path), "--json"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "only supported with --dry-run" in output
+
+
 def test_cli_queue_retry_failed_max_attempts_and_error_contains_filters(tmp_path):
     cli.main(["queue", "add", "--cache-dir", str(tmp_path), "http://127.0.0.1:1/a.bin"])
     cli.main(["queue", "add", "--cache-dir", str(tmp_path), "http://127.0.0.1:1/b.bin"])
@@ -245,6 +379,29 @@ def test_cli_queue_validate_valid_and_invalid(tmp_path, capsys):
     assert cli.main(["queue", "validate", "--cache-dir", str(tmp_path)]) == 1
     invalid_output = capsys.readouterr().out
     assert "malformed: 1" in invalid_output
+
+
+def test_cli_queue_validate_json_valid_and_invalid(tmp_path, capsys):
+    cli.main(["queue", "add", "--cache-dir", str(tmp_path), "https://example.com/a.bin"])
+    capsys.readouterr()
+
+    exit_code = cli.main(["queue", "validate", "--cache-dir", str(tmp_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["valid"] == 1
+    assert payload["issues"] == []
+
+    with queue_path(str(tmp_path)).open("a") as f:
+        f.write("{bad-json}\n")
+
+    exit_code = cli.main(["queue", "validate", "--cache-dir", str(tmp_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["malformed"] == 1
+    assert payload["issues"][0]["line_no"] == 2
+    assert payload["issues"][0]["issue_type"] == "malformed"
 
 
 def test_cli_queue_repair_fixes_invalid_queue(tmp_path, capsys):
