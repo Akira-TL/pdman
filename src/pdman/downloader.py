@@ -828,17 +828,36 @@ class Downloader:
             try:
                 await self._download_range_task(task)
                 allocator.mark_completed(task)
-            except Exception as e:
-                removed = task.discard_partial()
-                if removed:
-                    async with self.lock:
-                        self.downloaded_bytes = max(0, self.downloaded_bytes - removed)
-                if not allocator.mark_failed(task, str(e)):
-                    raise
-                self._logger.debug(
-                    f"Requeued dynamic range {task.start}-{task.end} after failure: {e}"
+            except SlowRangeError as e:
+                child = allocator.split_remaining(
+                    task, min_size=self.parent.min_split_size or 1
                 )
-                await asyncio.sleep(self.parent.retry_wait)
+                if child is not None:
+                    self._logger.debug(
+                        f"Split slow dynamic range {task.start}-{task.end}; "
+                        f"queued remaining range {child.start}-{child.end}: {e}"
+                    )
+                    continue
+                await self._retry_dynamic_range_after_failure(allocator, task, e)
+            except Exception as e:
+                await self._retry_dynamic_range_after_failure(allocator, task, e)
+
+    async def _retry_dynamic_range_after_failure(
+        self,
+        allocator: RangeAllocator,
+        task: RangeTask,
+        error: Exception,
+    ) -> None:
+        removed = task.discard_partial()
+        if removed:
+            async with self.lock:
+                self.downloaded_bytes = max(0, self.downloaded_bytes - removed)
+        if not allocator.mark_failed(task, str(error)):
+            raise error
+        self._logger.debug(
+            f"Requeued dynamic range {task.start}-{task.end} after failure: {error}"
+        )
+        await asyncio.sleep(self.parent.retry_wait)
 
     async def _start_dynamic_download(self) -> None:
         allocator = self._build_range_allocator()
