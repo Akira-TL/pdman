@@ -30,6 +30,7 @@ from .range_response import RangeResponseValidationError, validate_range_respons
 from .resume_metadata import (
     RESUME_METADATA_FILENAME,
     ResumeMetadataError,
+    dynamic_resume_metadata_payload,
     inspect_resume_segments,
     load_resume_metadata,
     static_resume_metadata_payload,
@@ -1064,6 +1065,29 @@ class Downloader:
                 )
         except Exception as e:
             self._logger.warning(f"Failed to write dynamic range metadata: {e}")
+        await self._write_dynamic_resume_metadata()
+
+    async def _write_dynamic_resume_metadata(self) -> None:
+        if self.range_allocator is None or self.pdm_tmp is None:
+            return
+        metadata_path = Path(self.pdm_tmp) / RESUME_METADATA_FILENAME
+        now = self._utc_now_iso()
+        try:
+            payload = dynamic_resume_metadata_payload(
+                url=self.url,
+                filename=self.filename,
+                target_path=self.target_path_if_named(),
+                file_size=self.file_size,
+                allocator=self.range_allocator,
+                etag=self._header_etag(),
+                last_modified=self._header_last_modified(),
+                created_at=now,
+                updated_at=now,
+            )
+            async with self.resume_metadata_lock:
+                await asyncio.to_thread(write_resume_metadata, metadata_path, payload)
+        except Exception as e:
+            self._logger.warning(f"Failed to write dynamic resume metadata: {e}")
 
     async def _start_dynamic_download(self) -> None:
         allocator = self._build_range_allocator()
