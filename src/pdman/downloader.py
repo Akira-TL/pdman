@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .manager import Manager
 from .chunk import Chunk, STREAM_CHUNK_SIZE
-from .range_allocator import RangeAllocator
+from .range_allocator import RangeAllocator, choose_dynamic_range_size
 from .range_task import RangeTask
 from .runtime import TmpSpaceInsufficient
 from .status import TaskReason, TaskResult, TaskStatus
@@ -246,14 +246,26 @@ class Downloader:
         return True
 
     def _build_range_allocator(self) -> RangeAllocator:
-        range_size = self.parent.min_split_size or self.file_size
-        return RangeAllocator(
+        worker_count = max(1, self.parent.max_concurrent_downloads)
+        min_split_size = self.parent.min_split_size or self.file_size
+        range_size = choose_dynamic_range_size(
+            file_size=self.file_size,
+            min_split_size=min_split_size,
+            worker_count=worker_count,
+        )
+        allocator = RangeAllocator(
             file_size=self.file_size,
             range_size=range_size,
             tmp_dir=self.pdm_tmp,
             filename=self.filename,
             max_retries=self.parent.retry,
         )
+        self._logger.debug(
+            "Dynamic segment mode enabled: "
+            f"file_size={self.file_size}, range_size={allocator.range_size}, "
+            f"workers={worker_count}, ranges={allocator.total_ranges}"
+        )
+        return allocator
 
     def build_request_headers(self) -> dict[str, str]:
         headers = {"Accept-Encoding": "identity"}
