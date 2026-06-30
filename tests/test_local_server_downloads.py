@@ -15,6 +15,7 @@ from pdman.status import TaskReason, TaskStatus
 
 PAYLOAD = (b"pdman-local-test-" * 8192) + b"end"
 UNKNOWN_SIZE_PAYLOAD = b"unknown-size-body" * 1024
+UNEVEN_PAYLOAD = (b"uneven-pdman-payload" * 157) + b"tail"
 REQUIRED_UA = "PDMAN-Integration-Test/1.0"
 FLAKY_COUNTS = {}
 DiskUsage = namedtuple("DiskUsage", "total used free")
@@ -40,6 +41,9 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/normal.bin":
             self._send_payload(PAYLOAD, "normal.bin", send_body)
+            return
+        if parsed.path == "/uneven.bin":
+            self._send_payload(UNEVEN_PAYLOAD, "uneven.bin", send_body)
             return
         if parsed.path == "/slow.bin":
             if not send_body:
@@ -185,6 +189,93 @@ def test_slow_head_succeeds_after_progress_delay(tmp_path):
         asyncio.run(manager.download())
 
         assert (tmp_path / "slow.bin").read_bytes() == PAYLOAD
+
+
+def test_dynamic_segment_download_writes_exact_file_with_two_workers(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            log_path=None,
+        )
+        manager.append(
+            server.url("/normal.bin"),
+            file_name="dynamic-2.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "dynamic-2.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_dynamic_segment_download_handles_uneven_file_with_four_workers(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=4,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            log_path=None,
+        )
+        manager.append(
+            server.url("/uneven.bin"),
+            file_name="dynamic-uneven.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "dynamic-uneven.bin").read_bytes() == UNEVEN_PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_dynamic_segment_download_validates_md5(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=4,
+            min_split_size="1K",
+            segment_mode="dynamic",
+            check_integrity=True,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/normal.bin"),
+            file_name="dynamic-md5.bin",
+            dir_path=str(tmp_path),
+            md5=hashlib.md5(PAYLOAD).hexdigest(),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "dynamic-md5.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_cli_dynamic_segment_download(tmp_path):
+    with LocalDownloadServer() as server:
+        exit_code = cli.main(
+            [
+                "--segment-mode",
+                "dynamic",
+                "-x",
+                "3",
+                "-k",
+                "1K",
+                "-N",
+                "1",
+                "-d",
+                str(tmp_path),
+                server.url("/normal.bin"),
+            ]
+        )
+
+        assert exit_code == 0
+        assert (tmp_path / "normal.bin").read_bytes() == PAYLOAD
 
 
 def test_download_writes_runtime_history_and_cleans_active_run(tmp_path):
