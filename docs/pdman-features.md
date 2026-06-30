@@ -273,6 +273,8 @@ v0.6.5 将 static resume rejection 提升到用户可见层：`TaskResult`、run
 
 v0.6.6 补齐 history 可见性：runtime history JSONL 稳定写入 `resume_rejection_code` / `resume_rejection_reason` 字段，`pdman history` 和 `pdman run <run_id>` 的 human 输出会显示 completed 任务的 resume rejection。该版本仍不新增独立 resume debug 命令，也不改变 dynamic recovery 未启用的边界。
 
+v0.6.7 新增内部 JSON payload helper：`resume_rejection_payload(...)` 可从 `TaskResult` 或 history record 生成 `{present, code, reason}` 结构。它只暴露最小诊断字段，不输出完整 resume metadata、本地 partial 路径或 dynamic debug ranges；该版本不新增 CLI 参数，也不改变恢复行为。
+
 ---
 
 ## 6. 回调命令

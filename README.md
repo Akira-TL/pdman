@@ -175,6 +175,8 @@ v0.6.5 起，static resume rejection 会进入 `TaskResult`、runtime history �
 
 v0.6.6 起，runtime history JSONL 稳定包含 `resume_rejection_code` / `resume_rejection_reason` 字段，`pdman history` 和 `pdman run <run_id>` 的 human 输出也会显示 completed 任务的 resume rejection。该版本只是补齐 history 可见性，不新增独立 resume debug 命令。
 
+v0.6.7 起，内部 JSON payload helper `resume_rejection_payload(...)` 会把 `TaskResult` 或 history record 归一化为 `{present, code, reason}`。这是后续 JSON/JSONL 或 agent 输出的基础，不会暴露完整 resume metadata，不新增 CLI 参数，也不改变下载恢复行为。
+
 ### 重试与超时
 
 ```bash
