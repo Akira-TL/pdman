@@ -693,7 +693,6 @@ class Downloader:
                     expected_file_size=self.file_size,
                     expected_etag=self._header_etag(),
                     expected_last_modified=self._header_last_modified(),
-                    expected_segments=self._expected_static_resume_segments(),
                     inspect_partials=True,
                 )
                 return self._chunks_from_resume_segments(inspect_resume_segments(payload))

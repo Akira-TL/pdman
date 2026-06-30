@@ -213,12 +213,12 @@ def test_downloader_writes_static_resume_metadata(tmp_path):
     asyncio.run(run_case())
 
 
-def test_rebuild_task_uses_strict_resume_metadata_layout(tmp_path):
+def test_rebuild_task_uses_resume_metadata_layout_even_when_chunk_options_change(tmp_path):
     async def run_case():
         manager = Manager(
             continue_download=True,
-            max_concurrent_downloads=2,
-            min_split_size="1K",
+            max_concurrent_downloads=8,
+            min_split_size="512",
             log_path=None,
         )
         tmp_dir = tmp_path / "tmp"
