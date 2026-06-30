@@ -14,6 +14,8 @@ from .status import TaskResult
 
 
 TMP_POLICIES = {"auto", "system", "target"}
+TMP_SPACE_MARGIN_RATIO = 0.05
+TMP_SPACE_MARGIN_BYTES = 64 * 1024 * 1024
 
 
 def utc_now_iso() -> str:
@@ -34,6 +36,44 @@ def default_cache_root() -> Path:
 
 def default_system_tmp_root() -> Path:
     return Path(tempfile.gettempdir()) / "pdman"
+
+
+def required_tmp_space(file_size: int | None) -> int | None:
+    if file_size is None or file_size <= 0:
+        return None
+    return int(file_size * (1 + TMP_SPACE_MARGIN_RATIO)) + TMP_SPACE_MARGIN_BYTES
+
+
+class TmpSpaceInsufficient(Exception):
+    def __init__(
+        self,
+        selected_dir: Path,
+        required_bytes: int | None,
+        available_bytes: int | None,
+        policy: str,
+    ):
+        self.selected_dir = selected_dir
+        self.required_bytes = required_bytes
+        self.available_bytes = available_bytes
+        self.policy = policy
+        super().__init__(self.describe())
+
+    def describe(self) -> str:
+        return (
+            "temporary directory has insufficient free space "
+            f"for policy={self.policy}: {self.selected_dir} "
+            f"requires={self.required_bytes} available={self.available_bytes}"
+        )
+
+
+@dataclass
+class TmpSpaceDecision:
+    selected_dir: Path
+    policy: str
+    fallback_used: bool
+    required_bytes: int | None
+    available_bytes: int | None
+    reason: str | None = None
 
 
 @dataclass
@@ -113,11 +153,83 @@ class RuntimePaths:
         return Path(target_dir).expanduser() / f".pdman.{task_id}"
 
     @staticmethod
-    def _has_space(path: Path, required_bytes: int | None) -> bool:
+    def _available_space(path: Path) -> int:
+        path.mkdir(parents=True, exist_ok=True)
+        return shutil.disk_usage(path).free
+
+    @staticmethod
+    def _has_space(available_bytes: int | None, required_bytes: int | None) -> bool:
         if required_bytes is None or required_bytes <= 0:
             return True
-        usage = shutil.disk_usage(path)
-        return usage.free > required_bytes
+        if available_bytes is None:
+            return False
+        return available_bytes >= required_bytes
+
+    def resolve_task_tmp_decision(
+        self,
+        *,
+        task_id: str,
+        target_dir: str | os.PathLike[str],
+        tmp_dir: str | os.PathLike[str] | None,
+        tmp_policy: str,
+        file_size: int | None,
+    ) -> TmpSpaceDecision:
+        policy = (tmp_policy or "auto").lower()
+        if policy not in TMP_POLICIES:
+            raise ValueError(f"Invalid tmp_policy: {tmp_policy}")
+
+        required_bytes = required_tmp_space(file_size)
+        target_tmp = self.target_tmp_dir(target_dir, task_id)
+
+        if tmp_dir:
+            tmp_root = Path(tmp_dir).expanduser()
+            available_bytes = self._available_space(tmp_root)
+            selected_dir = tmp_root / f".pdman.{task_id}"
+            if not self._has_space(available_bytes, required_bytes):
+                raise TmpSpaceInsufficient(
+                    selected_dir, required_bytes, available_bytes, "explicit"
+                )
+            return TmpSpaceDecision(
+                selected_dir=selected_dir,
+                policy="explicit",
+                fallback_used=False,
+                required_bytes=required_bytes,
+                available_bytes=available_bytes,
+            )
+
+        if policy == "target":
+            return TmpSpaceDecision(
+                selected_dir=target_tmp,
+                policy=policy,
+                fallback_used=False,
+                required_bytes=required_bytes,
+                available_bytes=None,
+            )
+
+        system_tmp = self.task_chunk_dir(task_id)
+        available_bytes = self._available_space(self.system_tmp_root)
+        if self._has_space(available_bytes, required_bytes):
+            return TmpSpaceDecision(
+                selected_dir=system_tmp,
+                policy=policy,
+                fallback_used=False,
+                required_bytes=required_bytes,
+                available_bytes=available_bytes,
+            )
+
+        reason = "system temporary directory has insufficient free space"
+        if policy == "system":
+            raise TmpSpaceInsufficient(
+                system_tmp, required_bytes, available_bytes, policy
+            )
+        return TmpSpaceDecision(
+            selected_dir=target_tmp,
+            policy=policy,
+            fallback_used=True,
+            required_bytes=required_bytes,
+            available_bytes=available_bytes,
+            reason=reason,
+        )
 
     def resolve_task_tmp_dir(
         self,
@@ -128,22 +240,13 @@ class RuntimePaths:
         tmp_policy: str,
         file_size: int | None,
     ) -> Path:
-        policy = (tmp_policy or "auto").lower()
-        if policy not in TMP_POLICIES:
-            raise ValueError(f"Invalid tmp_policy: {tmp_policy}")
-        if tmp_dir:
-            return Path(tmp_dir).expanduser() / f".pdman.{task_id}"
-        target_tmp = self.target_tmp_dir(target_dir, task_id)
-        if policy == "target":
-            return target_tmp
-        system_tmp = self.task_chunk_dir(task_id)
-        if policy == "system":
-            return system_tmp
-        self.system_tmp_root.mkdir(parents=True, exist_ok=True)
-        required_bytes = file_size if file_size and file_size > 0 else None
-        if self._has_space(self.system_tmp_root, required_bytes):
-            return system_tmp
-        return target_tmp
+        return self.resolve_task_tmp_decision(
+            task_id=task_id,
+            target_dir=target_dir,
+            tmp_dir=tmp_dir,
+            tmp_policy=tmp_policy,
+            file_size=file_size,
+        ).selected_dir
 
     def write_json(self, path: Path, data: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,7 +272,7 @@ class RuntimePaths:
             f.write(json.dumps(record, sort_keys=True) + "\n")
 
     def cleanup_run_dir(self) -> None:
-        shutil.rmtree(self.run_dir, ignore_errors=True)
+        shutil.rmtree(self.run_dir, ignore_errors=False)
 
 
 def task_result_to_record(
