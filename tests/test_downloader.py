@@ -6,6 +6,27 @@ from pdman.manager import Manager
 from pdman.status import TaskReason, TaskStatus
 
 
+def test_manager_segment_mode_defaults_to_static():
+    manager = Manager(log_path=None)
+
+    assert manager.segment_mode == "static"
+
+
+def test_manager_accepts_dynamic_segment_mode():
+    manager = Manager(segment_mode="dynamic", log_path=None)
+
+    assert manager.segment_mode == "dynamic"
+
+
+def test_manager_rejects_invalid_segment_mode():
+    try:
+        Manager(segment_mode="bad", log_path=None)
+    except ValueError as e:
+        assert "Invalid segment_mode" in str(e)
+    else:
+        raise AssertionError("invalid segment mode should raise")
+
+
 def test_refresh_downloaded_bytes_uses_existing_chunk_sizes(tmp_path):
     manager = Manager(log_path=None)
     downloader = Downloader(manager, "https://example.com/file.bin", str(tmp_path))

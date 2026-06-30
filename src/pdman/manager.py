@@ -123,6 +123,7 @@ class Manager:
         conf_path: 配置文件路径（JSON/YAML）
         quit_if_exists: 目标文件已存在则跳过下载
         summary_interval: 进度刷新间隔（秒）
+        segment_mode: 分段下载模式，static 或 dynamic
 
     attributes:
         config: 更新配置项的方法
@@ -183,6 +184,7 @@ class Manager:
         conf_path: str = None,
         quit_if_exists: bool = False,
         summary_interval: float = 1.0,
+        segment_mode: str = "static",
     ):
         self.max_downloads = max_downloads
         self.timeout = timeout
@@ -243,6 +245,7 @@ class Manager:
         self.conf_path = conf_path
         self.quit_if_exists = quit_if_exists
         self.summary_interval = summary_interval
+        self.segment_mode = segment_mode
 
         self._urls_lock = asyncio.Lock()
         self._urls: dict = {}  # {url: Downloader item, ...}
@@ -284,7 +287,7 @@ class Manager:
             "chunk_retry_speed", "force_sequential", "max_download_limit",
             "max_overall_download_limit", "http_auth", "proxy_auth", "headers",
             "connect_timeout", "connect_progress_delay",
-            "max_connection_per_server", "summary_interval",
+            "max_connection_per_server", "summary_interval", "segment_mode",
             "tmp_policy", "tmp_dir", "cache_dir", "keep_tmp",
         }
         for k, v in kwargs.items():
@@ -413,6 +416,9 @@ class Manager:
         self.tmp_policy = (self.tmp_policy or "auto").lower()
         if self.tmp_policy not in {"auto", "system", "target"}:
             raise ValueError(f"Invalid tmp_policy: {self.tmp_policy}")
+        self.segment_mode = (self.segment_mode or "static").lower()
+        if self.segment_mode not in {"static", "dynamic"}:
+            raise ValueError(f"Invalid segment_mode: {self.segment_mode}")
         # 加载配置文件（如果指定了 conf_path 且尚未加载）
         if self.conf_path is not None:
             self._load_config_file()
@@ -835,6 +841,7 @@ class Manager:
             f"continue_download={self.continue_download}, "
             f"max_concurrent_downloads={self.max_concurrent_downloads}, "
             f"min_split_size={self.min_split_size}, "
+            f"segment_mode={self.segment_mode}, "
             f"proxy={self.proxy})"
         )
 

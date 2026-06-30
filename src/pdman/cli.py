@@ -168,6 +168,7 @@ def add_queue_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tmp", default=None)
     parser.add_argument("--tmp-policy", choices=("auto", "system", "target"), default="auto")
     parser.add_argument("--keep-tmp", action="store_true")
+    parser.add_argument("--segment-mode", choices=("static", "dynamic"), default="static")
     parser.add_argument("--retry", type=int, default=3)
     parser.add_argument("--retry-wait", type=int, default=5)
 
@@ -186,6 +187,7 @@ def run_queue_records(args, *, status: str, empty_message: str) -> int:
         cache_dir=args.cache_dir,
         keep_tmp=args.keep_tmp,
         retry=args.retry,
+        segment_mode=args.segment_mode,
         retry_wait=args.retry_wait,
     )
     selected = start_queue_records(
@@ -533,6 +535,12 @@ def main(argv=None):
         help="Temporary directory policy. auto uses system tmp by default, target keeps legacy .pdman directories beside the output file.",
     )
     parser.add_argument(
+        "--segment-mode",
+        choices=("static", "dynamic"),
+        default="static",
+        help="Segmented download mode. static preserves legacy chunk slicing; dynamic uses the experimental range allocator.",
+    )
+    parser.add_argument(
         "--cache-dir",
         type=str,
         default=None,
@@ -695,6 +703,7 @@ def main(argv=None):
         cache_dir=args.cache_dir,
         keep_tmp=args.keep_tmp,
         check_integrity=args.check_integrity,
+        segment_mode=args.segment_mode,
         user_agent=args.user_agent,
         chunk_retry_speed=args.chunk_retry_speed,
         retry=args.retry,
