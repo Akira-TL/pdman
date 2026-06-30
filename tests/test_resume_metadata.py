@@ -6,6 +6,7 @@ from pdman.resume_metadata import (
     RESUME_METADATA_KIND,
     RESUME_METADATA_SCHEMA_VERSION,
     ResumeMetadataError,
+    inspect_resume_segments,
     load_resume_metadata,
     validate_resume_metadata,
     write_resume_metadata,
@@ -136,3 +137,39 @@ def test_write_and_load_resume_metadata_round_trips_json(tmp_path):
     assert encoded["kind"] == RESUME_METADATA_KIND
     assert encoded["segments"][0]["state"] == "completed"
     assert load_resume_metadata(metadata_path) == encoded
+
+
+def test_inspect_resume_segments_reads_existing_partial_sizes(tmp_path):
+    payload = resume_payload(tmp_path)
+    first_path = tmp_path / "file.bin.0"
+    second_path = tmp_path / "file.bin.1024"
+    first_path.write_bytes(b"x" * 1024)
+    second_path.write_bytes(b"y" * 12)
+
+    inspected = inspect_resume_segments(payload)
+
+    assert inspected[0]["existing_size"] == 1024
+    assert inspected[0]["state"] == "completed"
+    assert inspected[1]["existing_size"] == 12
+    assert inspected[1]["state"] == "partial"
+    assert payload["segments"][1]["existing_size"] == 512
+
+
+def test_inspect_resume_segments_marks_missing_partials_as_pending(tmp_path):
+    payload = resume_payload(tmp_path)
+
+    inspected = inspect_resume_segments(payload)
+
+    assert inspected[0]["existing_size"] == 0
+    assert inspected[0]["state"] == "pending"
+    assert inspected[1]["existing_size"] == 0
+    assert inspected[1]["state"] == "pending"
+
+
+def test_validate_resume_metadata_can_reject_actual_partial_larger_than_expected(tmp_path):
+    payload = resume_payload(tmp_path)
+    too_large_path = tmp_path / "file.bin.1024"
+    too_large_path.write_bytes(b"z" * 2048)
+
+    with pytest.raises(ResumeMetadataError, match="partial larger than expected"):
+        validate_resume_metadata(payload, inspect_partials=True)
