@@ -1,4 +1,5 @@
 import json
+import os
 
 import pdman.cli as cli
 
@@ -159,3 +160,63 @@ def test_cli_debug_ranges_wrong_schema_exits_non_zero(tmp_path, capsys):
     output = capsys.readouterr().out
     assert exit_code == 1
     assert "Unsupported dynamic range metadata schema_version" in output
+
+
+def test_cli_debug_ranges_latest_uses_newest_metadata(tmp_path, capsys):
+    older_dir = tmp_path / "old" / "task"
+    newer_dir = tmp_path / "new" / "task"
+    older_dir.mkdir(parents=True)
+    newer_dir.mkdir(parents=True)
+    older = write_metadata(older_dir)
+    newer = write_metadata(newer_dir)
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+
+    exit_code = cli.main([
+        "debug",
+        "ranges",
+        "--latest",
+        "--search-root",
+        str(tmp_path),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["source_path"] == str(newer)
+    assert payload["count"] == 3
+
+
+def test_cli_debug_ranges_latest_jsonl_honors_state_filter(tmp_path, capsys):
+    metadata_path = write_metadata(tmp_path)
+    os.utime(metadata_path, (200, 200))
+
+    exit_code = cli.main([
+        "debug",
+        "ranges",
+        "--latest",
+        "--search-root",
+        str(tmp_path),
+        "--state",
+        "failed",
+        "--jsonl",
+    ])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert len(lines) == 1
+    assert json.loads(lines[0])["state"] == "failed"
+
+
+def test_cli_debug_ranges_latest_missing_metadata_exits_non_zero(tmp_path, capsys):
+    exit_code = cli.main([
+        "debug",
+        "ranges",
+        "--latest",
+        "--search-root",
+        str(tmp_path),
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "No dynamic range metadata found" in output
