@@ -247,6 +247,24 @@ pdman run <run-id>
 
 这些命令只读取 `~/.cache/pdman` 中的历史记录，不会启动下载任务。也可以用 `--cache-dir DIR` 查询自定义 cache 目录。
 
+### 本地队列命令
+
+v0.4.3 开始，可以把任务写入本地队列后再启动下载：
+
+```bash
+pdman queue add "https://example.com/file.bin"
+pdman queue add -i tasks.yaml
+pdman queue add -d /data/downloads --file-name file.bin "https://example.com/file.bin"
+pdman queue list
+pdman queue list --status pending
+pdman queue start
+pdman queue start --limit 5
+```
+
+队列文件位于 `~/.cache/pdman/queue.jsonl`。`queue start` 会读取 `pending` 任务，使用真实 `Manager` 执行下载，并把队列状态更新为 `completed`、`skipped` 或 `failed`。
+
+当前队列是单进程 JSONL 基础实现，不保证多个 pdman 进程同时写入安全；`retry-failed`、删除/清理、优先级、daemon 和 SQLite 放到后续版本。
+
 ### 任务结果与退出码
 
 每次运行结束后，pdman 会汇总任务结果：

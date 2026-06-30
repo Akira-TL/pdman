@@ -316,7 +316,58 @@ pdman run <run-id>
 
 所有查询命令都支持 `--cache-dir DIR`，用于读取非默认 cache 目录。查询命令只读 history/run metadata，不会启动下载任务，也不会修改任务状态。
 
-v0.4.1 不提供 history 删除、时间范围过滤、active run 查询、retry failed 或 queue 操作。
+v0.4.1 不提供 history 删除、时间范围过滤、active run 查询或 retry failed。
+
+### 7.2 Queue foundation
+
+v0.4.3 引入本地 JSONL 队列基础：
+
+```text
+~/.cache/pdman/queue.jsonl
+```
+
+队列命令：
+
+```bash
+pdman queue add "https://example.com/file.bin"
+pdman queue add -i tasks.yaml
+pdman queue add -d /data/downloads --file-name file.bin "https://example.com/file.bin"
+pdman queue list
+pdman queue list --status pending
+pdman queue start
+pdman queue start --limit 5
+```
+
+queue record schema：
+
+```json
+{
+  "queue_id": "20260701T120000Z-a1b2c3d4",
+  "url": "https://example.com/file.bin",
+  "file_name": "file.bin",
+  "dir_path": "/data/downloads",
+  "md5": null,
+  "status": "pending",
+  "created_at": "...",
+  "updated_at": "...",
+  "last_run_id": null,
+  "last_error": null
+}
+```
+
+queue status：
+
+| 状态 | 含义 |
+| --- | --- |
+| `pending` | 等待执行 |
+| `running` | 已被当前 `queue start` 取出执行 |
+| `completed` | 最近一次执行成功完成 |
+| `skipped` | 最近一次执行被成功跳过 |
+| `failed` | 最近一次执行失败 |
+
+`queue start` 会读取 queue 中的任务，真实创建 `Manager` 并执行下载，然后根据 `Manager.results` 更新 queue 状态。测试使用本地 HTTP server 覆盖成功下载和 HTTP 失败路径，不使用 mock Manager。
+
+限制：v0.4.3 不提供多进程写入安全保证，不提供 queue 删除、retry-failed、优先级、daemon、SQLite 或 agent event stream。
 
 ---
 
