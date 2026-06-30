@@ -102,6 +102,50 @@ def test_list_runs_and_load_run(tmp_path):
     assert load_run("missing", str(tmp_path)) is None
 
 
+def test_format_history_shows_resume_rejection_for_completed_task():
+    history_text = format_history(
+        [
+            {
+                "filename": "resumed.bin",
+                "status": "completed",
+                "downloaded_bytes": 1024,
+                "finished_at": "2026-01-01T00:00:00Z",
+                "resume_rejection_code": "file_size_mismatch",
+                "resume_rejection_reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+            }
+        ]
+    )
+
+    assert "resumed.bin" in history_text
+    assert "Resume rejected [file_size_mismatch]: file_size mismatch" in history_text
+
+
+def test_format_run_detail_shows_resume_rejection_for_completed_task():
+    detail_text = format_run_detail(
+        {
+            "run_id": "run-1",
+            "status": "finished",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:01:00Z",
+            "tmp_policy": "auto",
+            "task_counts": {"completed": 1, "skipped": 0, "failed": 0},
+            "exit_code": 0,
+        },
+        [
+            {
+                "filename": "resumed.bin",
+                "status": "completed",
+                "downloaded_bytes": 2048,
+                "resume_rejection_code": "url_mismatch",
+                "resume_rejection_reason": "Resume rejected [url_mismatch]: url mismatch",
+            }
+        ],
+    )
+
+    assert "resumed.bin" in detail_text
+    assert "Resume rejected [url_mismatch]: url mismatch" in detail_text
+
+
 def test_formatters_include_status_counts_and_tasks():
     history_text = format_history(
         [

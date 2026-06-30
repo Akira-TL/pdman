@@ -41,6 +41,29 @@ def test_cli_history_does_not_start_download_manager(tmp_path, monkeypatch, caps
     assert "ok.bin" in capsys.readouterr().out
 
 
+def test_cli_history_shows_resume_rejection(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "filename": "resumed.bin",
+                "status": "completed",
+                "downloaded_bytes": 1024,
+                "resume_rejection_code": "file_size_mismatch",
+                "resume_rejection_reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+            }
+        ],
+    )
+
+    exit_code = cli.main(["history", "--cache-dir", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "resumed.bin" in output
+    assert "Resume rejected [file_size_mismatch]: file_size mismatch" in output
+
+
 def test_cli_history_failed_filter(tmp_path, capsys):
     write_history(
         tmp_path,
