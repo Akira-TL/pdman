@@ -224,6 +224,43 @@ pdman debug ranges --latest --search-root /path/to/tmp --jsonl
 
 v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
+### Strict resume metadata v2
+
+v0.6.0 引入独立的 resume metadata v2 模型，用于后续 static / dynamic recovery。它和 v0.5.x 的 `dynamic-ranges.json` debug metadata 明确分离：debug metadata 只用于诊断，resume metadata 才是未来恢复下载时允许读取的稳定 contract。
+
+resume metadata v2 的基础结构如下：
+
+```json
+{
+  "schema_version": 2,
+  "kind": "resume",
+  "mode": "static",
+  "url": "https://example.com/file.bin",
+  "filename": "file.bin",
+  "target_path": "/downloads/file.bin",
+  "file_size": 2048,
+  "etag": "abc123",
+  "last_modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+  "created_at": "2026-06-30T00:00:00Z",
+  "updated_at": "2026-06-30T00:00:00Z",
+  "segments": [
+    {
+      "index": 0,
+      "start": 0,
+      "end": 1023,
+      "path": "/tmp/pdman/file.bin.0",
+      "expected_size": 1024,
+      "existing_size": 1024,
+      "state": "completed"
+    }
+  ]
+}
+```
+
+v0.6.0 只提供 metadata 层能力：`write_resume_metadata`、`load_resume_metadata`、`validate_resume_metadata` 和 `inspect_resume_segments`。校验会拒绝不支持的 `schema_version`、错误的 `kind`、不支持的 `mode`、缺失或非法的 segment、文件大小不匹配、segment layout 不匹配，以及 JSON 或磁盘上的 partial 文件大于 `expected_size` 的情况。`inspect_resume_segments` 会只读检查 partial 路径，缺失文件记为 `existing_size=0` / `pending`，大小等于期望记为 `completed`，介于两者之间记为 `partial`。
+
+v0.6.0 不自动恢复下载，不修复 corrupted partial，不做 URL refresh，不做 HEAD fallback GET，也不把该 metadata 接入 CLI resume 流程。后续 v0.6.1 / v0.6.2 再分别把该 contract 接入 static resume 和 dynamic recovery。
+
 ---
 
 ## 6. 回调命令

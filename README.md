@@ -161,6 +161,8 @@ pdman debug ranges --latest --search-root /path/to/tmp --jsonl
 
 `pdman debug ranges` 只读取 v0.5.5+ 的 dynamic debug metadata；不会恢复下载，不会修改 metadata 或下载文件，也不承诺跨大版本 metadata 兼容。v0.5.9 起，`--latest` 会从默认系统 tmp root、cache root 以及额外 `--search-root` 中递归查找最新的有效 `dynamic-ranges.json`；如果使用了显式 `--tmp` 或 target tmp，建议把对应目录传给 `--search-root`。
 
+v0.6.0 开始新增独立的 resume metadata v2 模型，用于后续严格恢复下载。它和 `dynamic-ranges.json` debug metadata 分离，字段包含 `schema_version=2`、`kind=resume`、`mode=static|dynamic`、URL、目标文件信息、file size、etag / last modified 以及 segments。当前版本只提供 metadata 读写、schema / layout 校验和 partial 文件大小检查；不会自动恢复下载，也不会修复 corrupted partial。static resume 接入和 dynamic recovery 会放到后续 v0.6.x。
+
 ### 重试与超时
 
 ```bash
