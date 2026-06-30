@@ -142,6 +142,17 @@ class RangeAllocator:
         self.split_count += 1
         return child
 
+    def task_state(self, task: RangeTask) -> str:
+        if task in self.completed:
+            return "completed"
+        if task in self.failed:
+            return "failed"
+        if task.index in self._active:
+            return "active"
+        if task in self._pending:
+            return "pending"
+        return "unknown"
+
     @property
     def total_ranges(self) -> int:
         return len(self.ranges)
