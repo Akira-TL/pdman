@@ -175,7 +175,7 @@ pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
 | 模式 | 行为 |
 | --- | --- |
 | `static` | 默认行为，保留原有静态 chunk slicing 和中途拆分路径 |
-| `dynamic` | 实验性动态 range allocator；按 `--min-split-size` 生成 ranges，多 worker 反复领取 range，完成后按 offset 合并 |
+| `dynamic` | 实验性动态 range allocator；根据文件大小、worker 数和 `--min-split-size` 生成 ranges，多 worker 反复领取 range，完成后按 offset 合并 |
 
 `dynamic` 模式只在文件大小已知、服务端声明 `Accept-Ranges: bytes` 且未启用 `--continue` 时使用。以下情况会回退到 `static` 路径：
 
@@ -183,7 +183,17 @@ pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
 - 服务端未声明 `Accept-Ranges: bytes`。
 - 用户启用了 `--continue`。
 
-v0.5.0 的 dynamic mode 是基础实现，不包含 adaptive range size、慢 worker 拆分、dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
+v0.5.1 起，dynamic range size 使用以下策略：
+
+```text
+base = file_size // (worker_count * 4)
+range_size = max(min_split_size, base)
+range_size 向下对齐到 64 KiB 边界
+```
+
+这样可以避免大文件因为 `--min-split-size` 太小而生成过多 range，同时仍保留每个 worker 多次领取 range 的空间。`RangeAllocator` 也暴露 `total_ranges`、`pending_count`、`active_count`、`completed_count`、`failed_count`，用于测试和 debug。dynamic 启动时会在 debug 日志中记录 file size、range size、worker 数和 range 数。
+
+v0.5.x 的 dynamic mode 仍是实验路径，不包含慢 worker 拆分、dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
 ---
 

@@ -146,7 +146,7 @@ v0.5.0 开始提供实验性的动态分段模式。默认仍是兼容旧行为�
 pdman --segment-mode dynamic -x 4 -k 1M "https://example.com/file.bin"
 ```
 
-`--segment-mode dynamic` 会使用 range allocator 把文件按 `--min-split-size` 拆成可领取的 ranges，多 worker 持续领取 range 并按 offset 合并。v0.5.0 暂不做 adaptive range size、慢 worker 拆分、dynamic resume 或默认启用 dynamic；未知文件大小、`--continue` 或服务端未声明 `Accept-Ranges: bytes` 时会回退到 static 路径。
+`--segment-mode dynamic` 会使用 range allocator 生成可领取的 ranges，多 worker 持续领取 range 并按 offset 合并。v0.5.1 起 dynamic range size 会按文件大小、worker 数和 `--min-split-size` 计算：至少不小于 `--min-split-size`，目标约为每个 worker 4 个 ranges，并按 64 KiB 边界对齐，避免大文件产生过多小 range。v0.5.x 暂不做慢 worker 拆分、dynamic resume 或默认启用 dynamic；未知文件大小、`--continue` 或服务端未声明 `Accept-Ranges: bytes` 时会回退到 static 路径。
 
 ### 重试与超时
 
