@@ -21,6 +21,7 @@ from .history import (
 )
 from .manager import Manager
 from .output import (
+    history_records_payload,
     print_json,
     print_jsonl,
     queue_add_payload,
@@ -64,6 +65,9 @@ def handle_history_command(argv=None) -> int:
     )
     parser.add_argument("--failed", action="store_true")
     parser.add_argument("--run-id", default=None)
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     status = "failed" if args.failed else args.status
@@ -73,6 +77,13 @@ def handle_history_command(argv=None) -> int:
         status=status,
         run_id=args.run_id,
     )
+    payload = history_records_payload(records)
+    if args.json:
+        print_json(payload)
+        return 0
+    if args.jsonl:
+        print_jsonl(payload["records"])
+        return 0
     print(format_history(records))
     return 0
 
