@@ -6,6 +6,53 @@ from pdman.manager import Manager
 from pdman.status import TaskReason, TaskStatus
 
 
+def test_downloader_dynamic_segment_support_checks(tmp_path):
+    manager = Manager(segment_mode="dynamic", log_path=None)
+    downloader = Downloader(
+        manager,
+        "https://example.com/file.bin",
+        str(tmp_path),
+        filename="file.bin",
+    )
+    downloader.file_size = 1024
+    downloader.header_info = {"Accept-Ranges": "bytes"}
+
+    assert downloader._can_use_dynamic_segments() is True
+
+    downloader.header_info = {"Accept-Ranges": "none"}
+    assert downloader._can_use_dynamic_segments() is False
+
+    downloader.header_info = {"Accept-Ranges": "bytes"}
+    downloader.file_size = -1
+    assert downloader._can_use_dynamic_segments() is False
+
+    downloader.file_size = 1024
+    manager.continue_download = True
+    assert downloader._can_use_dynamic_segments() is False
+
+
+def test_downloader_dynamic_allocator_uses_range_size_policy(tmp_path):
+    manager = Manager(
+        segment_mode="dynamic",
+        max_concurrent_downloads=4,
+        min_split_size="1M",
+        log_path=None,
+    )
+    downloader = Downloader(
+        manager,
+        "https://example.com/file.bin",
+        str(tmp_path),
+        filename="file.bin",
+        pdm_tmp=str(tmp_path / "tmp"),
+    )
+    downloader.file_size = 1024 * 1024 * 1024
+
+    allocator = downloader._build_range_allocator()
+
+    assert allocator.range_size == 64 * 1024 * 1024
+    assert allocator.total_ranges == 16
+
+
 def test_manager_segment_mode_defaults_to_static():
     manager = Manager(log_path=None)
 

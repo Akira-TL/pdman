@@ -1,4 +1,46 @@
-from pdman.range_allocator import RangeAllocator
+from pdman.range_allocator import DYNAMIC_RANGE_ALIGNMENT, RangeAllocator, choose_dynamic_range_size
+
+
+def test_choose_dynamic_range_size_keeps_at_least_min_split_size():
+    assert choose_dynamic_range_size(
+        file_size=10 * 1024,
+        min_split_size=1024,
+        worker_count=4,
+    ) == 1024
+
+
+def test_choose_dynamic_range_size_scales_large_files_and_aligns():
+    range_size = choose_dynamic_range_size(
+        file_size=1024 * 1024 * 1024,
+        min_split_size=1024 * 1024,
+        worker_count=4,
+    )
+
+    assert range_size > 1024 * 1024
+    assert range_size % DYNAMIC_RANGE_ALIGNMENT == 0
+    assert range_size == 64 * 1024 * 1024
+
+
+def test_choose_dynamic_range_size_rejects_invalid_values():
+    invalid_cases = [
+        {"file_size": 0, "min_split_size": 1, "worker_count": 1},
+        {"file_size": 1, "min_split_size": 0, "worker_count": 1},
+        {"file_size": 1, "min_split_size": 1, "worker_count": 0},
+        {
+            "file_size": 1,
+            "min_split_size": 1,
+            "worker_count": 1,
+            "target_ranges_per_worker": 0,
+        },
+    ]
+
+    for kwargs in invalid_cases:
+        try:
+            choose_dynamic_range_size(**kwargs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected ValueError for {kwargs}")
 
 
 def test_range_allocator_covers_full_file(tmp_path):
@@ -43,13 +85,23 @@ def test_range_allocator_tracks_completed_ranges(tmp_path):
         filename="file.bin",
     )
 
+    assert allocator.total_ranges == 2
+    assert allocator.pending_count == 2
+    assert allocator.active_count == 0
+    assert allocator.completed_count == 0
+    assert allocator.failed_count == 0
+
     first = allocator.claim_next()
     assert first is not None
+    assert allocator.pending_count == 1
+    assert allocator.active_count == 1
     first.path.write_bytes(b"1234")
     allocator.mark_completed(first)
 
     assert allocator.completed == [first]
     assert allocator.completed_bytes == 4
+    assert allocator.active_count == 0
+    assert allocator.completed_count == 1
 
 
 def test_range_allocator_requeues_failed_range_until_retry_limit(tmp_path):
@@ -73,6 +125,7 @@ def test_range_allocator_requeues_failed_range_until_retry_limit(tmp_path):
 
     assert allocator.claim_next() is None
     assert allocator.has_failures
+    assert allocator.failed_count == 1
     assert allocator.failed == [first]
     assert first.last_error == "permanent failure"
 
