@@ -169,6 +169,8 @@ v0.6.2 起，dynamic 下载也会写入 `resume-metadata.json`，并继续同时
 
 v0.6.3 起，resume metadata 被拒绝时会带稳定 reason code，并使用类似 `Resume rejected [file_size_mismatch]: ...` 的可读日志。当前仅改善诊断表达，不改变 exit code，不新增 JSON/JSONL resume diagnostics，也不自动修复或清理 legacy `.pdm` 行为。
 
+v0.6.4 起，缺失 `resume-metadata.json` 但存在旧 `.pdm` 时，pdman 仍会兼容恢复，但会输出 legacy fallback warning。若 `resume-metadata.json` 存在但被拒绝，pdman 会清理旧 tmp 并重新开始，不会退回 `.pdm`，避免绕过 v2 的严格拒绝原因。
+
 ### 重试与超时
 
 ```bash

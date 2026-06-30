@@ -267,6 +267,8 @@ v0.6.2 将同一 contract 扩展到 dynamic metadata emission：dynamic mode 会
 
 v0.6.3 为 resume rejection 增加稳定 reason code 和统一可读日志，例如 `Resume rejected [file_size_mismatch]: ...`。这用于让用户和后续 agent 知道为什么拒绝复用 tmp。v0.6.3 不改变 exit code、不新增 JSON/JSONL resume 输出、不自动修复 partial，也不清理 legacy `.pdm` fallback。
 
+v0.6.4 开始收紧 legacy fallback 边界：缺失 `resume-metadata.json` 时仍允许 `.pdm` 兼容恢复，但会输出 warning，提醒这是旧兼容路径。若 v2 metadata 存在但校验拒绝，不会再退回 `.pdm`，而是清理旧 tmp 并重新开始，避免旧 fallback 绕过严格的 URL、target、file size、etag、last-modified 和 partial size 检查。
+
 ---
 
 ## 6. 回调命令
