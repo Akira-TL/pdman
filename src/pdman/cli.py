@@ -11,6 +11,14 @@ import argparse
 import asyncio
 from importlib.metadata import PackageNotFoundError, version as package_version
 
+from .history import (
+    format_history,
+    format_run_detail,
+    format_runs,
+    list_runs,
+    load_run,
+    query_history,
+)
 from .manager import Manager
 
 
@@ -21,7 +29,75 @@ def get_version() -> str:
         return "unknown"
 
 
+def handle_history_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman history")
+    parser.add_argument("--last", type=int, default=20)
+    parser.add_argument(
+        "--status",
+        choices=("completed", "skipped", "failed"),
+        default=None,
+    )
+    parser.add_argument("--failed", action="store_true")
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    status = "failed" if args.failed else args.status
+    records = query_history(
+        args.cache_dir,
+        last=args.last,
+        status=status,
+        run_id=args.run_id,
+    )
+    print(format_history(records))
+    return 0
+
+
+def handle_runs_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman runs")
+    parser.add_argument("--last", type=int, default=20)
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    print(format_runs(list_runs(args.cache_dir, last=args.last)))
+    return 0
+
+
+def handle_run_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman run")
+    parser.add_argument("run_id")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    run = load_run(args.run_id, args.cache_dir)
+    if run is None:
+        print(f"Run not found: {args.run_id}")
+        return 1
+    tasks = query_history(
+        args.cache_dir,
+        last=0,
+        run_id=args.run_id,
+    )
+    print(format_run_detail(run, tasks))
+    return 0
+
+
+def handle_query_command(argv=None) -> int:
+    argv = list(argv or [])
+    if not argv:
+        return 1
+    command, rest = argv[0], argv[1:]
+    if command == "history":
+        return handle_history_command(rest)
+    if command == "runs":
+        return handle_runs_command(rest)
+    if command == "run":
+        return handle_run_command(rest)
+    return 1
+
+
 def main(argv=None):
+    argv = list(argv) if argv is not None else sys.argv[1:]
+    if argv and argv[0] in {"history", "runs", "run"}:
+        return handle_query_command(argv)
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-v",
