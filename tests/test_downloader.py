@@ -215,7 +215,12 @@ def test_downloader_writes_static_resume_metadata(tmp_path):
 
 def test_rebuild_task_uses_strict_resume_metadata_layout(tmp_path):
     async def run_case():
-        manager = Manager(continue_download=True, log_path=None)
+        manager = Manager(
+            continue_download=True,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            log_path=None,
+        )
         tmp_dir = tmp_path / "tmp"
         tmp_dir.mkdir()
         first_path = tmp_dir / "file.bin.0"

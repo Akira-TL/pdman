@@ -18,6 +18,7 @@ from loguru._logger import Logger, Core
 
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,6 +27,15 @@ from .chunk import Chunk, STREAM_CHUNK_SIZE
 from .range_allocator import RangeAllocator, choose_dynamic_range_size
 from .range_metadata import DYNAMIC_RANGE_METADATA_FILENAME, write_range_metadata
 from .range_response import RangeResponseValidationError, validate_range_response
+from .resume_metadata import (
+    RESUME_METADATA_FILENAME,
+    ResumeMetadataError,
+    inspect_resume_segments,
+    load_resume_metadata,
+    static_resume_metadata_payload,
+    validate_resume_metadata,
+    write_resume_metadata,
+)
 from .range_task import RangeTask
 from .runtime import TmpSpaceInsufficient
 from .status import TaskReason, TaskResult, TaskStatus
@@ -135,6 +145,7 @@ class Downloader:
         self.downloaded_bytes: int = 0
         self.lock = asyncio.Lock()
         self.metadata_lock = asyncio.Lock()
+        self.resume_metadata_lock = asyncio.Lock()
         self.header_info = None
         self.log_path = log_path
         self._downloaded = False
@@ -214,6 +225,8 @@ class Downloader:
         if self.chunk_root is None:
             self.chunk_root = await self.build_task()
         self.refresh_downloaded_bytes()
+        if self._should_write_static_resume_metadata():
+            await self._write_static_resume_metadata()
         # 单任务限速器（在 Manager 全局限速之外）
         self._per_task_limiter = None
         if self.parent.max_download_limit:
@@ -543,14 +556,27 @@ class Downloader:
     def get_file_size(self) -> int:
         return self.file_size
 
-    async def build_task(self):
+    def _legacy_pdm_info_path(self) -> str:
+        return os.path.join(self.pdm_tmp, ".pdm")
+
+    def _write_legacy_pdm_info(self) -> None:
+        with open(self._legacy_pdm_info_path(), "w") as f:
+            info = {
+                "url": self.url,
+                "filename": self.filename,
+                "md5": self.md5,
+                "file_size": self.file_size,
+            }
+            json.dump(info, f, indent=4)
+
+    def _reset_tmp_with_pdm_info(self) -> None:
+        shutil.rmtree(self.pdm_tmp, ignore_errors=True)
+        os.makedirs(self.pdm_tmp, exist_ok=True)
+        self._write_legacy_pdm_info()
+
+    def _static_chunk_specs(self) -> list[tuple[int, int | None, str]]:
         if self.file_size < 0:
-            return Chunk(
-                self,
-                0,
-                None,
-                os.path.join(self.pdm_tmp, f"{self.filename}.0"),
-            )
+            return [(0, None, os.path.join(self.pdm_tmp, f"{self.filename}.0"))]
         chunk_size = self.file_size // self.parent.max_concurrent_downloads
         if chunk_size < self.parent.min_split_size:
             chunk_size = self.parent.min_split_size
@@ -559,36 +585,127 @@ class Downloader:
         starts = list(range(0, self.file_size, chunk_size))
         if starts[-1] < self.parent.min_split_size and len(starts) > 1:
             starts.pop()
-        root = None
-        for i in range(len(starts)):
-            start = starts[i]
-            end = starts[i + 1] - 1 if i + 1 < len(starts) else self.file_size - 1
-            if root is None:
-                root = cur = Chunk(
-                    self,
-                    start,
-                    end,
-                    os.path.join(self.pdm_tmp, f"{self.filename}.{start}"),
-                )
-                continue
+        specs: list[tuple[int, int | None, str]] = []
+        for i, start in enumerate(starts):
             if start >= self.file_size:
                 self._logger.warning(
                     f"start {start} >= file_size {self.file_size}, break"
                 )
                 break
-            cur.next = Chunk(
-                self,
-                start,
-                end,
-                os.path.join(self.pdm_tmp, f"{self.filename}.{start}"),
+            end = starts[i + 1] - 1 if i + 1 < len(starts) else self.file_size - 1
+            specs.append((start, end, os.path.join(self.pdm_tmp, f"{self.filename}.{start}")))
+        return specs
+
+    def _chunks_from_specs(self, specs: list[tuple[int, int | None, str]]) -> Chunk | None:
+        root = None
+        cur = None
+        for start, end, path in specs:
+            chunk = Chunk(self, start, end, path, cur)
+            if root is None:
+                root = chunk
+            else:
+                assert cur is not None
+                cur.next = chunk
+            cur = chunk
+        return root
+
+    def _expected_static_resume_segments(self) -> list[dict[str, int]]:
+        segments: list[dict[str, int]] = []
+        for index, (start, end, _path) in enumerate(self._static_chunk_specs()):
+            if end is None:
+                continue
+            segments.append(
+                {
+                    "index": index,
+                    "start": start,
+                    "end": end,
+                    "expected_size": end - start + 1,
+                }
             )
-            cur = cur.next
+        return segments
+
+    def _header_etag(self) -> str | None:
+        if self.header_info is None:
+            return None
+        value = self.header_info.get("ETag")
+        return str(value) if value is not None else None
+
+    def _header_last_modified(self) -> str | None:
+        if self.header_info is None:
+            return None
+        value = self.header_info.get("Last-Modified")
+        return str(value) if value is not None else None
+
+    def _chunks_from_resume_segments(self, segments: list[dict]) -> Chunk | None:
+        specs = [
+            (int(segment["start"]), int(segment["end"]), str(segment["path"]))
+            for segment in segments
+        ]
+        return self._chunks_from_specs(specs)
+
+    def _should_write_static_resume_metadata(self) -> bool:
+        return self.file_size >= 0 and not self._dynamic_segment_decision().use_dynamic
+
+    def _utc_now_iso(self) -> str:
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+            "+00:00", "Z"
+        )
+
+    async def _write_static_resume_metadata(self) -> None:
+        if self.chunk_root is None or self.pdm_tmp is None or self.file_size < 0:
+            return
+        metadata_path = Path(self.pdm_tmp) / RESUME_METADATA_FILENAME
+        chunks = [chunk for chunk in self.chunk_root if chunk.end is not None]
+        if not chunks:
+            return
+        now = self._utc_now_iso()
+        try:
+            payload = static_resume_metadata_payload(
+                url=self.url,
+                filename=self.filename,
+                target_path=self.target_path_if_named(),
+                file_size=self.file_size,
+                chunks=chunks,
+                etag=self._header_etag(),
+                last_modified=self._header_last_modified(),
+                created_at=now,
+                updated_at=now,
+            )
+            async with self.resume_metadata_lock:
+                await asyncio.to_thread(write_resume_metadata, metadata_path, payload)
+        except Exception as e:
+            self._logger.warning(f"Failed to write static resume metadata: {e}")
+
+    async def build_task(self):
+        root = self._chunks_from_specs(self._static_chunk_specs())
         assert root is not None
         return root
 
     async def rebuild_task(self):
+        metadata_path = Path(self.pdm_tmp) / RESUME_METADATA_FILENAME
+        if metadata_path.exists() and self.file_size >= 0:
+            try:
+                payload = load_resume_metadata(metadata_path)
+                validate_resume_metadata(
+                    payload,
+                    expected_url=self.url,
+                    expected_target_path=self.target_path_if_named(),
+                    expected_file_size=self.file_size,
+                    expected_etag=self._header_etag(),
+                    expected_last_modified=self._header_last_modified(),
+                    expected_segments=self._expected_static_resume_segments(),
+                    inspect_partials=True,
+                )
+                return self._chunks_from_resume_segments(inspect_resume_segments(payload))
+            except ResumeMetadataError as e:
+                self._logger.warning(
+                    f"Resume metadata mismatch, discarding stale temp files: {e}"
+                )
+                self._reset_tmp_with_pdm_info()
+                return None
+
         # 校验 .pdm 元数据完整性：确保恢复的临时文件属于当前下载任务
-        pdm_file = os.path.join(self.pdm_tmp, ".pdm")
+        pdm_file = self._legacy_pdm_info_path()
         if not os.path.exists(pdm_file):
             return None
         try:
@@ -603,9 +720,11 @@ class Downloader:
                 self._logger.warning(
                     ".pdm metadata mismatch, discarding stale temp files"
                 )
+                self._reset_tmp_with_pdm_info()
                 return None
         except (json.JSONDecodeError, IOError):
             self._logger.warning("Failed to read .pdm file, discarding temp files")
+            self._reset_tmp_with_pdm_info()
             return None
         file_list = {
             p.removeprefix(os.path.join(self.pdm_tmp, self.filename) + "."): p
@@ -666,24 +785,16 @@ class Downloader:
             new_chunk.end = target_chunk.end
             target_chunk.end = new_start - 1
             target_chunk.next = new_chunk
+        await self._write_static_resume_metadata()
         return new_chunk
 
     def creat_info(self):
         if not self.parent.continue_download or not os.path.exists(
-            os.path.join(self.pdm_tmp, ".pdm")
+            self._legacy_pdm_info_path()
         ):
-            shutil.rmtree(self.pdm_tmp, ignore_errors=True)
-            os.makedirs(self.pdm_tmp, exist_ok=True)
-            with open(os.path.join(self.pdm_tmp, ".pdm"), "w") as f:
-                info = {
-                    "url": self.url,
-                    "filename": self.filename,
-                    "md5": self.md5,
-                    "file_size": self.file_size,
-                }
-                json.dump(info, f, indent=4)
-        elif os.path.exists(os.path.join(self.pdm_tmp, ".pdm")):
-            with open(os.path.join(self.pdm_tmp, ".pdm"), "r") as f:
+            self._reset_tmp_with_pdm_info()
+        elif os.path.exists(self._legacy_pdm_info_path()):
+            with open(self._legacy_pdm_info_path(), "r") as f:
                 info = json.load(f)
                 if (
                     info.get("md5") != self.md5
@@ -694,16 +805,8 @@ class Downloader:
                     self._logger.warning(
                         "Existing .pdm file info does not match current download info, recreating .pdm file."
                     )
-                    shutil.rmtree(self.pdm_tmp)
-                    os.makedirs(self.pdm_tmp, exist_ok=True)
-                    with open(os.path.join(self.pdm_tmp, ".pdm"), "w") as f:
-                        info = {
-                            "url": self.url,
-                            "filename": self.filename,
-                            "md5": self.md5,
-                            "file_size": self.file_size,
-                        }
-                        json.dump(info, f, indent=4)
+                    self._reset_tmp_with_pdm_info()
+                    return
         else:
             self._logger.error("Unknown error in creating .pdm file.")
 
