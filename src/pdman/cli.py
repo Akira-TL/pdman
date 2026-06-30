@@ -37,11 +37,13 @@ from .queue import recover_running, remove_queue_records, repair_queue
 from .queue import retry_failed_candidates, start_queue_records, validate_queue
 from .range_metadata_inspect import (
     RangeMetadataError,
+    find_latest_range_metadata,
     filter_ranges,
     format_range_metadata,
     load_range_metadata,
     range_metadata_summary,
 )
+from .runtime import default_cache_root, default_system_tmp_root
 from .task_input import TaskInput, load_task_input
 
 
@@ -389,9 +391,20 @@ def handle_queue_command(argv=None) -> int:
     return 1
 
 
+def _debug_range_search_roots(args) -> list[str]:
+    roots = [str(default_system_tmp_root())]
+    cache_root = str(default_cache_root() if args.cache_dir is None else args.cache_dir)
+    roots.append(cache_root)
+    roots.extend(args.search_root or [])
+    return roots
+
+
 def handle_debug_ranges_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman debug ranges")
-    parser.add_argument("metadata_file")
+    parser.add_argument("metadata_file", nargs="?", default=None)
+    parser.add_argument("--latest", action="store_true")
+    parser.add_argument("--search-root", action="append", default=[])
+    parser.add_argument("--cache-dir", default=None)
     parser.add_argument(
         "--state",
         choices=("pending", "active", "completed", "failed", "unknown"),
@@ -402,19 +415,32 @@ def handle_debug_ranges_command(argv=None) -> int:
     output_group.add_argument("--jsonl", action="store_true")
     args = parser.parse_args(argv)
 
+    if args.latest:
+        metadata_path = find_latest_range_metadata(_debug_range_search_roots(args))
+        if metadata_path is None:
+            print("No dynamic range metadata found.")
+            return 1
+    else:
+        if args.metadata_file is None:
+            print("metadata file required, or use --latest")
+            return 1
+        metadata_path = args.metadata_file
+
     try:
-        payload = load_range_metadata(args.metadata_file)
+        payload = load_range_metadata(metadata_path)
     except RangeMetadataError as exc:
         print(f"Error: {exc}")
         return 1
 
     if args.json:
-        print_json(range_metadata_summary(payload, state=args.state))
+        json_payload = range_metadata_summary(payload, state=args.state)
+        json_payload["source_path"] = str(metadata_path)
+        print_json(json_payload)
         return 0
     if args.jsonl:
         print_jsonl(filter_ranges(payload, state=args.state))
         return 0
-    print(format_range_metadata(payload, state=args.state, source_path=args.metadata_file))
+    print(format_range_metadata(payload, state=args.state, source_path=metadata_path))
     return 0
 
 
