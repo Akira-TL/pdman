@@ -199,6 +199,8 @@ v0.5.3 起，`SlowRangeError` 会优先尝试 split remaining：已下载的 par
 
 v0.5.4 起，dynamic mode 会校验 Range 响应：`206` 必须包含 `Content-Range`，且 start/end 必须匹配请求区间；total 如果不是 `*`，必须等于已知文件大小。`200` 只允许用于 full-file range；partial range 收到 `200`、缺失或不匹配的 `Content-Range`、短 body 都会作为 range failure 处理，并进入已有 retry / failed 流程。
 
+v0.5.5 起，dynamic mode 会在任务 tmp 目录写入 `dynamic-ranges.json` debug metadata draft，记录 schema version、range size、allocator stats、每个 range 的 state、attempts、last_error、downloaded bytes、existing size、expected size、last_speed_bps 和 path。该文件只用于调试和后续 resume 设计参考，不是稳定 resume contract；成功清理 tmp 时会随 tmp 删除，失败且保留 tmp 时可直接查看。
+
 v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
 ---
