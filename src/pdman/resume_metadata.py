@@ -146,6 +146,76 @@ def validate_resume_metadata(
                 )
 
 
+def dynamic_resume_metadata_payload(
+    *,
+    url: str,
+    filename: str,
+    target_path: str | Path,
+    file_size: int,
+    allocator: Any,
+    etag: str | None = None,
+    last_modified: str | None = None,
+    created_at: str | None = None,
+    updated_at: str | None = None,
+) -> dict[str, Any]:
+    payload = _base_resume_metadata_payload(
+        mode="dynamic",
+        url=url,
+        filename=filename,
+        target_path=target_path,
+        file_size=file_size,
+        etag=etag,
+        last_modified=last_modified,
+        created_at=created_at,
+        updated_at=updated_at,
+        segments=[
+            _range_task_resume_segment_payload(index, allocator, task)
+            for index, task in enumerate(allocator.ranges)
+        ],
+    )
+    validate_resume_metadata(payload)
+    return payload
+
+
+def _range_task_resume_segment_payload(
+    index: int,
+    allocator: Any,
+    task: Any,
+) -> dict[str, Any]:
+    expected_size = task.expected_size
+    existing_size = task.existing_size()
+    state = _resume_state_for_range_task(
+        allocator.task_state(task),
+        existing_size,
+        expected_size,
+    )
+    return {
+        "index": index,
+        "start": task.start,
+        "end": task.end,
+        "path": str(task.path),
+        "expected_size": expected_size,
+        "existing_size": existing_size,
+        "state": state,
+    }
+
+
+def _resume_state_for_range_task(
+    allocator_state: str,
+    existing_size: int,
+    expected_size: int,
+) -> str:
+    if allocator_state == "completed":
+        return "completed"
+    if allocator_state == "failed":
+        return "failed"
+    if allocator_state == "active":
+        return _state_for_existing_size(existing_size, expected_size)
+    if allocator_state == "pending":
+        return "pending"
+    return "pending"
+
+
 def static_resume_metadata_payload(
     *,
     url: str,
@@ -158,10 +228,42 @@ def static_resume_metadata_payload(
     created_at: str | None = None,
     updated_at: str | None = None,
 ) -> dict[str, Any]:
-    payload = {
+    payload = _base_resume_metadata_payload(
+        mode="static",
+        url=url,
+        filename=filename,
+        target_path=target_path,
+        file_size=file_size,
+        etag=etag,
+        last_modified=last_modified,
+        created_at=created_at,
+        updated_at=updated_at,
+        segments=[
+            _chunk_resume_segment_payload(index, chunk)
+            for index, chunk in enumerate(chunks)
+        ],
+    )
+    validate_resume_metadata(payload)
+    return payload
+
+
+def _base_resume_metadata_payload(
+    *,
+    mode: str,
+    url: str,
+    filename: str,
+    target_path: str | Path,
+    file_size: int,
+    etag: str | None,
+    last_modified: str | None,
+    created_at: str | None,
+    updated_at: str | None,
+    segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
         "schema_version": RESUME_METADATA_SCHEMA_VERSION,
         "kind": RESUME_METADATA_KIND,
-        "mode": "static",
+        "mode": mode,
         "url": url,
         "filename": filename,
         "target_path": str(target_path),
@@ -170,13 +272,8 @@ def static_resume_metadata_payload(
         "last_modified": last_modified,
         "created_at": created_at,
         "updated_at": updated_at,
-        "segments": [
-            _chunk_resume_segment_payload(index, chunk)
-            for index, chunk in enumerate(chunks)
-        ],
+        "segments": segments,
     }
-    validate_resume_metadata(payload)
-    return payload
 
 
 def _chunk_resume_segment_payload(index: int, chunk: Any) -> dict[str, Any]:
