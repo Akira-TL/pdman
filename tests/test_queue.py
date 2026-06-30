@@ -12,6 +12,7 @@ from pdman.queue import (
     format_queue_validation,
     load_queue,
     query_queue,
+    queue_lock_path,
     queue_path,
     recover_running,
     remove_queue_records,
@@ -29,6 +30,10 @@ def test_load_queue_missing_returns_empty(tmp_path):
     assert format_queue([]) == "No queue records found."
 
 
+def test_queue_lock_path_is_cache_local(tmp_path):
+    assert queue_lock_path(str(tmp_path)) == tmp_path / "queue.lock"
+
+
 def test_append_and_query_queue_records(tmp_path):
     records = create_queue_records(
         [
@@ -41,6 +46,7 @@ def test_append_and_query_queue_records(tmp_path):
 
     append_queue(records, str(tmp_path))
 
+    assert queue_lock_path(str(tmp_path)).exists()
     loaded = load_queue(str(tmp_path))
     assert loaded[0].schema_version == QUEUE_SCHEMA_VERSION
     assert [record.file_name for record in loaded] == ["a.bin", "b.bin"]

@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .filelock import FileLock
 from .runtime import default_cache_root, utc_now_iso
 from .status import TaskResult, TaskStatus
 from .task_input import TaskInput
@@ -108,6 +109,10 @@ def queue_lock_path(cache_dir: str | None = None) -> Path:
     return root / "queue.lock"
 
 
+def queue_lock(cache_dir: str | None = None, timeout: float | None = 10.0) -> FileLock:
+    return FileLock(queue_lock_path(cache_dir), timeout=timeout)
+
+
 def _read_jsonl(path: Path) -> list[tuple[int, str]]:
     if not path.exists():
         return []
@@ -129,7 +134,7 @@ def load_queue(cache_dir: str | None = None) -> list[QueueRecord]:
     return records
 
 
-def append_queue(records: list[QueueRecord], cache_dir: str | None = None) -> None:
+def _append_queue_unlocked(records: list[QueueRecord], cache_dir: str | None = None) -> None:
     if not records:
         return
     path = queue_path(cache_dir)
@@ -139,7 +144,12 @@ def append_queue(records: list[QueueRecord], cache_dir: str | None = None) -> No
             f.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
 
 
-def rewrite_queue(records: list[QueueRecord], cache_dir: str | None = None) -> None:
+def append_queue(records: list[QueueRecord], cache_dir: str | None = None) -> None:
+    with queue_lock(cache_dir):
+        _append_queue_unlocked(records, cache_dir)
+
+
+def _rewrite_queue_unlocked(records: list[QueueRecord], cache_dir: str | None = None) -> None:
     path = queue_path(cache_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -147,6 +157,11 @@ def rewrite_queue(records: list[QueueRecord], cache_dir: str | None = None) -> N
         "".join(json.dumps(record.to_dict(), sort_keys=True) + "\n" for record in records)
     )
     tmp_path.replace(path)
+
+
+def rewrite_queue(records: list[QueueRecord], cache_dir: str | None = None) -> None:
+    with queue_lock(cache_dir):
+        _rewrite_queue_unlocked(records, cache_dir)
 
 
 def query_queue(
@@ -254,93 +269,97 @@ def format_queue_validation(report: QueueValidationReport) -> str:
 
 
 def repair_queue(cache_dir: str | None = None) -> dict[str, int]:
-    path = queue_path(cache_dir)
-    seen_ids: set[str] = set()
-    repaired: list[QueueRecord] = []
-    stats = {
-        "kept": 0,
-        "dropped_malformed": 0,
-        "dropped_invalid": 0,
-        "dropped_unsupported_schema": 0,
-        "fixed": 0,
-    }
-    now = utc_now_iso()
-    for _, line in _read_jsonl(path):
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            stats["dropped_malformed"] += 1
-            continue
-        if not isinstance(data, dict):
-            stats["dropped_invalid"] += 1
-            continue
-        fixed = False
-        schema_version = data.get("schema_version", QUEUE_SCHEMA_VERSION)
-        try:
-            schema_version = int(schema_version)
-        except (TypeError, ValueError):
-            schema_version = QUEUE_SCHEMA_VERSION
-            fixed = True
-        if schema_version > QUEUE_SCHEMA_VERSION:
-            stats["dropped_unsupported_schema"] += 1
-            continue
-        data["schema_version"] = QUEUE_SCHEMA_VERSION
-        queue_id = str(data.get("queue_id") or "")
-        if not queue_id or queue_id in seen_ids:
-            data["queue_id"] = new_queue_id()
-            fixed = True
-        if not data.get("url"):
-            stats["dropped_invalid"] += 1
-            continue
-        if data.get("status", "pending") not in QUEUE_STATUSES:
-            data["status"] = "failed"
-            data["last_error"] = "repaired invalid queue status"
-            fixed = True
-        if not data.get("created_at"):
-            data["created_at"] = now
-            fixed = True
-        if not data.get("updated_at"):
-            data["updated_at"] = data["created_at"]
-            fixed = True
-        try:
-            record = QueueRecord.from_dict(data)
-        except (ValueError, TypeError):
-            stats["dropped_invalid"] += 1
-            continue
-        seen_ids.add(record.queue_id)
-        repaired.append(record)
-        stats["kept"] += 1
-        if fixed:
-            stats["fixed"] += 1
-    rewrite_queue(repaired, cache_dir)
-    return stats
+    with queue_lock(cache_dir):
+        path = queue_path(cache_dir)
+        seen_ids: set[str] = set()
+        repaired: list[QueueRecord] = []
+        stats = {
+            "kept": 0,
+            "dropped_malformed": 0,
+            "dropped_invalid": 0,
+            "dropped_unsupported_schema": 0,
+            "fixed": 0,
+        }
+        now = utc_now_iso()
+        for _, line in _read_jsonl(path):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                stats["dropped_malformed"] += 1
+                continue
+            if not isinstance(data, dict):
+                stats["dropped_invalid"] += 1
+                continue
+            fixed = False
+            schema_version = data.get("schema_version", QUEUE_SCHEMA_VERSION)
+            try:
+                schema_version = int(schema_version)
+            except (TypeError, ValueError):
+                schema_version = QUEUE_SCHEMA_VERSION
+                fixed = True
+            if schema_version > QUEUE_SCHEMA_VERSION:
+                stats["dropped_unsupported_schema"] += 1
+                continue
+            data["schema_version"] = QUEUE_SCHEMA_VERSION
+            queue_id_value = data.get("queue_id")
+            queue_id = str(queue_id_value) if queue_id_value else ""
+            if not queue_id or queue_id in seen_ids:
+                data["queue_id"] = new_queue_id()
+                fixed = True
+            if not data.get("url"):
+                stats["dropped_invalid"] += 1
+                continue
+            if data.get("status", "pending") not in QUEUE_STATUSES:
+                data["status"] = "failed"
+                data["last_error"] = "repaired invalid queue status"
+                fixed = True
+            if not data.get("created_at"):
+                data["created_at"] = now
+                fixed = True
+            if not data.get("updated_at"):
+                data["updated_at"] = data["created_at"]
+                fixed = True
+            try:
+                record = QueueRecord.from_dict(data)
+            except (ValueError, TypeError):
+                stats["dropped_invalid"] += 1
+                continue
+            seen_ids.add(record.queue_id)
+            repaired.append(record)
+            stats["kept"] += 1
+            if fixed:
+                stats["fixed"] += 1
+        _rewrite_queue_unlocked(repaired, cache_dir)
+        return stats
 
 
 def recover_running(cache_dir: str | None = None) -> int:
-    records = load_queue(cache_dir)
-    recovered = 0
-    now = utc_now_iso()
-    for record in records:
-        if record.status == "running":
-            record.status = "pending"
-            record.last_error = "recovered from stale running state"
-            record.updated_at = now
-            recovered += 1
-    if recovered:
-        rewrite_queue(records, cache_dir)
-    return recovered
+    with queue_lock(cache_dir):
+        records = load_queue(cache_dir)
+        recovered = 0
+        now = utc_now_iso()
+        for record in records:
+            if record.status == "running":
+                record.status = "pending"
+                record.last_error = "recovered from stale running state"
+                record.updated_at = now
+                recovered += 1
+        if recovered:
+            _rewrite_queue_unlocked(records, cache_dir)
+        return recovered
 
 
 def remove_queue_records(queue_ids: list[str], cache_dir: str | None = None) -> int:
-    wanted = set(queue_ids)
-    records = load_queue(cache_dir)
-    kept = [record for record in records if record.queue_id not in wanted]
-    removed = len(records) - len(kept)
-    if removed:
-        rewrite_queue(kept, cache_dir)
-    return removed
+    with queue_lock(cache_dir):
+        wanted = set(queue_ids)
+        records = load_queue(cache_dir)
+        kept = [record for record in records if record.queue_id not in wanted]
+        removed = len(records) - len(kept)
+        if removed:
+            _rewrite_queue_unlocked(kept, cache_dir)
+        return removed
 
 
 def clear_queue(
@@ -353,16 +372,17 @@ def clear_queue(
         raise ValueError("clear_queue requires status or all_records=True")
     if status is not None and status not in QUEUE_STATUSES:
         raise ValueError(f"Invalid queue status: {status}")
-    records = load_queue(cache_dir)
-    if all_records:
-        cleared = len(records)
-        kept: list[QueueRecord] = []
-    else:
-        kept = [record for record in records if record.status != status]
-        cleared = len(records) - len(kept)
-    if cleared:
-        rewrite_queue(kept, cache_dir)
-    return cleared
+    with queue_lock(cache_dir):
+        records = load_queue(cache_dir)
+        if all_records:
+            cleared = len(records)
+            kept: list[QueueRecord] = []
+        else:
+            kept = [record for record in records if record.status != status]
+            cleared = len(records) - len(kept)
+        if cleared:
+            _rewrite_queue_unlocked(kept, cache_dir)
+        return cleared
 
 
 def task_to_queue_record(task: TaskInput) -> QueueRecord:
