@@ -1,6 +1,7 @@
 import json
 
 from pdman.output import (
+    history_records_payload,
     print_jsonl,
     resume_rejection_payload,
     queue_add_payload,
@@ -43,6 +44,40 @@ def test_resume_rejection_payload_from_history_record_and_empty_record():
         "reason": "Resume rejected [url_mismatch]: url mismatch",
     }
     assert resume_rejection_payload({}) == {
+        "present": False,
+        "code": None,
+        "reason": None,
+    }
+
+
+def test_history_records_payload_includes_resume_diagnostics():
+    records = [
+        {
+            "run_id": "run-1",
+            "filename": "resumed.bin",
+            "status": "completed",
+            "downloaded_bytes": 1024,
+            "resume_rejection_code": "file_size_mismatch",
+            "resume_rejection_reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+        },
+        {
+            "run_id": "run-1",
+            "filename": "fresh.bin",
+            "status": "completed",
+            "downloaded_bytes": 2048,
+        },
+    ]
+
+    payload = history_records_payload(records)
+
+    assert payload["count"] == 2
+    assert payload["records"][0]["filename"] == "resumed.bin"
+    assert payload["records"][0]["resume_rejection"] == {
+        "present": True,
+        "code": "file_size_mismatch",
+        "reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+    }
+    assert payload["records"][1]["resume_rejection"] == {
         "present": False,
         "code": None,
         "reason": None,
