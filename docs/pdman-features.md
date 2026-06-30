@@ -261,7 +261,9 @@ v0.6.0 只提供 metadata 层能力：`write_resume_metadata`、`load_resume_met
 
 v0.6.0 不自动恢复下载，不修复 corrupted partial，不做 URL refresh，不做 HEAD fallback GET，也不把该 metadata 接入 CLI resume 流程。
 
-v0.6.1 将该 contract 接入 static `--continue` 路径：static 下载会在任务 tmp 目录写入 `resume-metadata.json`，记录当前 chunk layout 和 partial size。继续下载时，如果该文件存在，pdman 会优先使用它重建 chunk 链，并严格校验 URL、target path、file size、etag、last-modified、segment layout 和磁盘 partial size。校验失败时会清理旧 tmp 并重新开始，避免错误复用旧 partial。缺失 `resume-metadata.json` 时仍保留 legacy `.pdm` fallback，用于兼容旧 tmp。dynamic recovery 仍放在后续 v0.6.x。
+v0.6.1 将该 contract 接入 static `--continue` 路径：static 下载会在任务 tmp 目录写入 `resume-metadata.json`，记录当前 chunk layout 和 partial size。继续下载时，如果该文件存在，pdman 会优先使用 metadata 内记录的旧 layout 重建 chunk 链，并严格校验 URL、target path、file size、etag、last-modified 和磁盘 partial size。改变 `-x` / `-k` 只影响新任务切块，不会单独触发 resume mismatch。校验失败时会清理旧 tmp 并重新开始，避免错误复用旧 partial。缺失 `resume-metadata.json` 时仍保留 legacy `.pdm` fallback，用于兼容旧 tmp。
+
+v0.6.2 将同一 contract 扩展到 dynamic metadata emission：dynamic mode 会继续写 `dynamic-ranges.json` debug metadata，同时额外写 `resume-metadata.json`，其中 `mode=dynamic`，segments 直接来自当前 `RangeAllocator.ranges`。split 后的 parent / child range 会按真实 runtime layout 记录，不会重新按 range size 推导。`dynamic-ranges.json` 仍服务 readable / JSON / JSONL 诊断；`resume-metadata.json` 只服务未来 recovery contract。v0.6.2 不从 dynamic resume metadata 自动恢复下载，也不尝试修复 corrupted partial。
 
 ---
 
