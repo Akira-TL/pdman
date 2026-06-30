@@ -173,6 +173,8 @@ v0.6.4 起，缺失 `resume-metadata.json` 但存在旧 `.pdm` 时，pdman 仍�
 
 v0.6.5 起，static resume rejection 会进入 `TaskResult`、runtime history 和 human summary 的 `Resume:` 小节，方便用户看到本次任务为什么没有复用旧 tmp。该可见性不改变 exit code，不新增专门的 JSON/JSONL resume diagnostics，也不启用 dynamic recovery。
 
+v0.6.6 起，runtime history JSONL 稳定包含 `resume_rejection_code` / `resume_rejection_reason` 字段，`pdman history` 和 `pdman run <run_id>` 的 human 输出也会显示 completed 任务的 resume rejection。该版本只是补齐 history 可见性，不新增独立 resume debug 命令。
+
 ### 重试与超时
 
 ```bash
