@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,6 +9,7 @@ from pdman.resume_metadata import (
     ResumeMetadataError,
     inspect_resume_segments,
     load_resume_metadata,
+    static_resume_metadata_payload,
     validate_resume_metadata,
     write_resume_metadata,
 )
@@ -47,6 +49,57 @@ def resume_payload(tmp_path):
             },
         ],
     }
+
+
+def test_static_resume_metadata_payload_serializes_chunk_chain(tmp_path):
+    first_path = tmp_path / "file.bin.0"
+    second_path = tmp_path / "file.bin.1024"
+    first_path.write_bytes(b"x" * 1024)
+    second_path.write_bytes(b"y" * 12)
+    first = SimpleNamespace(start=0, end=1023, chunk_path=str(first_path))
+    second = SimpleNamespace(start=1024, end=2047, chunk_path=str(second_path))
+
+    payload = static_resume_metadata_payload(
+        url="https://example.invalid/file.bin",
+        filename="file.bin",
+        target_path=tmp_path / "file.bin",
+        file_size=2048,
+        chunks=[first, second],
+        etag="abc123",
+        last_modified="Wed, 01 Jan 2025 00:00:00 GMT",
+        created_at="2026-06-30T00:00:00Z",
+        updated_at="2026-06-30T00:00:00Z",
+    )
+
+    assert payload["schema_version"] == RESUME_METADATA_SCHEMA_VERSION
+    assert payload["kind"] == RESUME_METADATA_KIND
+    assert payload["mode"] == "static"
+    assert payload["url"] == "https://example.invalid/file.bin"
+    assert payload["target_path"] == str(tmp_path / "file.bin")
+    assert payload["file_size"] == 2048
+    assert payload["etag"] == "abc123"
+    assert payload["last_modified"] == "Wed, 01 Jan 2025 00:00:00 GMT"
+    assert payload["segments"] == [
+        {
+            "index": 0,
+            "start": 0,
+            "end": 1023,
+            "path": str(first_path),
+            "expected_size": 1024,
+            "existing_size": 1024,
+            "state": "completed",
+        },
+        {
+            "index": 1,
+            "start": 1024,
+            "end": 2047,
+            "path": str(second_path),
+            "expected_size": 1024,
+            "existing_size": 12,
+            "state": "partial",
+        },
+    ]
+    validate_resume_metadata(payload)
 
 
 def test_validate_resume_metadata_accepts_static_and_dynamic_modes(tmp_path):
