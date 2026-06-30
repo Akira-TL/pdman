@@ -73,6 +73,7 @@ def test_dynamic_segment_decision_fallback_reasons(tmp_path):
         ({"continue_download": True}, {}, "continue_not_supported"),
         ({}, {"file_size": -1}, "unknown_file_size"),
         ({}, {"header_info": {"Accept-Ranges": "none"}}, "accept_ranges_not_bytes"),
+        ({}, {"header_info": {}}, "accept_ranges_not_bytes"),
         ({"force_sequential": True}, {}, "force_sequential_enabled"),
         ({"max_concurrent_downloads": 1}, {}, "insufficient_workers"),
         ({"min_split_size": "4K"}, {}, "file_too_small"),
@@ -87,6 +88,36 @@ def test_dynamic_segment_decision_fallback_reasons(tmp_path):
 
         assert decision.use_dynamic is False
         assert decision.reason == expected_reason
+
+
+def test_dynamic_segment_decision_accept_ranges_header_quirks(tmp_path):
+    accepted_values = ["bytes", "Bytes", "BYTES", "bytes, none", "none, bytes"]
+    for accept_ranges in accepted_values:
+        downloader = make_decision_downloader(tmp_path)
+        downloader.header_info = {"Accept-Ranges": accept_ranges}
+
+        decision = downloader._dynamic_segment_decision()
+
+        assert decision.use_dynamic is True
+        assert decision.reason == "dynamic_eligible"
+
+    rejected_values = ["none", "items", "", None]
+    for accept_ranges in rejected_values:
+        downloader = make_decision_downloader(tmp_path)
+        downloader.header_info = {"Accept-Ranges": accept_ranges}
+
+        decision = downloader._dynamic_segment_decision()
+
+        assert decision.use_dynamic is False
+        assert decision.reason == "accept_ranges_not_bytes"
+
+
+def test_get_url_file_size_treats_invalid_content_length_as_unknown(tmp_path):
+    downloader = make_decision_downloader(tmp_path)
+    for content_length in (None, "", "unknown", "12.5", "-10"):
+        downloader.header_info = {"Content-Length": content_length}
+
+        assert asyncio.run(downloader.get_url_file_size()) == -1
 
 
 def test_downloader_dynamic_allocator_uses_range_size_policy(tmp_path):
