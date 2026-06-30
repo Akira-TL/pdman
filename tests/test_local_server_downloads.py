@@ -85,7 +85,7 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         if parsed.path == "/slow-range-once.bin":
             range_header = self.headers.get("Range")
             if send_body and range_header:
-                key = f"{parsed.path}:{range_header}"
+                key = parsed.path
                 FLAKY_COUNTS[key] = FLAKY_COUNTS.get(key, 0) + 1
                 if FLAKY_COUNTS[key] == 1:
                     self._send_slow_payload(PAYLOAD, "slow-range-once.bin", send_body)
@@ -317,7 +317,7 @@ def test_dynamic_segment_download_fails_after_range_retry_limit(tmp_path):
         assert manager.exit_code == 1
 
 
-def test_dynamic_segment_download_recovers_slow_range_once(tmp_path):
+def test_dynamic_segment_download_splits_slow_range_once(tmp_path):
     FLAKY_COUNTS.clear()
     with LocalDownloadServer() as server:
         manager = Manager(
@@ -338,6 +338,7 @@ def test_dynamic_segment_download_recovers_slow_range_once(tmp_path):
         asyncio.run(manager.download())
 
         assert (tmp_path / "dynamic-slow-range.bin").read_bytes() == PAYLOAD
+        assert FLAKY_COUNTS["/slow-range-once.bin"] > 1
         assert manager.results[0].status == TaskStatus.COMPLETED
         assert manager.exit_code == 0
 

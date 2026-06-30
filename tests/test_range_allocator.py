@@ -132,6 +132,87 @@ def test_range_allocator_requeues_failed_range_until_retry_limit(tmp_path):
     assert first.last_error == "permanent failure"
 
 
+def test_range_task_reports_remaining_split_state(tmp_path):
+    allocator = RangeAllocator(
+        file_size=10,
+        range_size=10,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    task = allocator.ranges[0]
+    task.path.write_bytes(b"abc")
+
+    assert task.next_start == 3
+    assert task.remaining_size == 7
+    assert task.can_split(1)
+
+
+def test_range_allocator_split_remaining_renames_partial_and_creates_child(tmp_path):
+    allocator = RangeAllocator(
+        file_size=10,
+        range_size=10,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    task = allocator.claim_next()
+    assert task is not None
+    task.path.write_bytes(b"abc")
+    original_path = task.path
+
+    child = allocator.split_remaining(task, min_size=1)
+
+    assert child is not None
+    assert task.start == 0
+    assert task.end == 2
+    assert task.path.name == "file.bin.range.0-2"
+    assert task.path.read_bytes() == b"abc"
+    assert not original_path.exists()
+    assert child.start == 3
+    assert child.end == 9
+    assert child.path.name == "file.bin.range.3-9"
+    assert allocator.completed == [task]
+    assert allocator.pending_count == 1
+    assert allocator.active_count == 0
+    assert allocator.total_ranges == 2
+    assert allocator.split_count == 1
+    claimed_child = allocator.claim_next()
+    assert claimed_child is child
+    assert claimed_child.attempts == 1
+
+
+def test_range_allocator_split_remaining_returns_none_without_partial(tmp_path):
+    allocator = RangeAllocator(
+        file_size=10,
+        range_size=10,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    task = allocator.claim_next()
+    assert task is not None
+
+    assert allocator.split_remaining(task, min_size=1) is None
+    assert allocator.completed_count == 0
+    assert allocator.pending_count == 0
+    assert allocator.active_count == 1
+
+
+def test_range_allocator_split_remaining_returns_none_when_remaining_too_small(tmp_path):
+    allocator = RangeAllocator(
+        file_size=10,
+        range_size=10,
+        tmp_dir=tmp_path,
+        filename="file.bin",
+    )
+    task = allocator.claim_next()
+    assert task is not None
+    task.path.write_bytes(b"abcdefghi")
+
+    assert allocator.split_remaining(task, min_size=1) is None
+    assert allocator.completed_count == 0
+    assert allocator.pending_count == 0
+    assert allocator.active_count == 1
+
+
 def test_range_task_discard_partial_removes_file_and_resets_counter(tmp_path):
     allocator = RangeAllocator(
         file_size=8,
