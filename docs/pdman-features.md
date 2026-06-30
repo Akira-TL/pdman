@@ -191,11 +191,13 @@ range_size = max(min_split_size, base)
 range_size 向下对齐到 64 KiB 边界
 ```
 
-这样可以避免大文件因为 `--min-split-size` 太小而生成过多 range，同时仍保留每个 worker 多次领取 range 的空间。`RangeAllocator` 也暴露 `total_ranges`、`pending_count`、`active_count`、`completed_count`、`failed_count`、`retried_count`、`requeue_count`，用于测试和 debug。dynamic 启动时会在 debug 日志中记录 file size、range size、worker 数和 range 数。
+这样可以避免大文件因为 `--min-split-size` 太小而生成过多 range，同时仍保留每个 worker 多次领取 range 的空间。`RangeAllocator` 也暴露 `total_ranges`、`pending_count`、`active_count`、`completed_count`、`failed_count`、`retried_count`、`requeue_count`、`split_count`，用于测试和 debug。dynamic 启动时会在 debug 日志中记录 file size、range size、worker 数和 range 数。
 
 v0.5.2 起，dynamic range worker 会记录每个 range 的 `downloaded_bytes`、`last_speed_bps` 和 `last_error`。如果 range 下载失败，或流式下载速度低于 `--chunk-retry-speed`，pdman 会删除该 range 的 partial 文件、修正当前任务进度字节数，并按 `--retry` 重新入队。超过 retry limit 后，整个任务记录为 failed。
 
-v0.5.x 的 dynamic mode 仍是实验路径，不包含慢 worker 拆分、dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
+v0.5.3 起，`SlowRangeError` 会优先尝试 split remaining：已下载的 partial bytes 会重命名为较短的 completed range，剩余区间会作为 child range 插回 pending 队列继续下载。普通网络错误仍保持 v0.5.2 的删除 partial 后 retry 语义。
+
+v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
 ---
 
