@@ -17,7 +17,10 @@ from pdman.queue import (
     recover_running,
     remove_queue_records,
     repair_queue,
+    retry_failed_candidates,
     rewrite_queue,
+    select_queue_records,
+    start_queue_records,
     update_queue_from_results,
     validate_queue,
 )
@@ -28,6 +31,7 @@ from pdman.task_input import TaskInput
 def test_load_queue_missing_returns_empty(tmp_path):
     assert load_queue(str(tmp_path)) == []
     assert format_queue([]) == "No queue records found."
+    assert format_queue([], title="Retry candidates:") == "Retry candidates records not found."
 
 
 def test_queue_lock_path_is_cache_local(tmp_path):
@@ -52,6 +56,18 @@ def test_append_and_query_queue_records(tmp_path):
     assert [record.file_name for record in loaded] == ["a.bin", "b.bin"]
     assert [record.file_name for record in query_queue(str(tmp_path), status="failed")] == ["b.bin"]
     assert [record.file_name for record in query_queue(str(tmp_path), last=1)] == ["b.bin"]
+
+
+def test_query_queue_filters_attempts(tmp_path):
+    records = [
+        QueueRecord(queue_id="q1", url="https://example.com/a.bin", attempts=1),
+        QueueRecord(queue_id="q2", url="https://example.com/b.bin", attempts=3),
+        QueueRecord(queue_id="q3", url="https://example.com/c.bin", attempts=5),
+    ]
+    rewrite_queue(records, str(tmp_path))
+
+    assert [record.queue_id for record in query_queue(str(tmp_path), attempts_ge=3)] == ["q2", "q3"]
+    assert [record.queue_id for record in query_queue(str(tmp_path), attempts_lt=3)] == ["q1"]
 
 
 def test_rewrite_queue_replaces_records(tmp_path):
@@ -90,6 +106,7 @@ def test_legacy_queue_record_without_schema_version_loads_as_v1(tmp_path):
     assert record.schema_version == QUEUE_SCHEMA_VERSION
     assert record.queue_id == "q1"
     assert record.attempts == 0
+    assert record.last_status_reason is None
 
 
 def test_validate_queue_reports_invalid_attempts(tmp_path):
@@ -171,7 +188,9 @@ def test_repair_queue_fixes_repairable_records_and_drops_unrepairable(tmp_path):
     assert stats["fixed"] == 4
     assert len({record.queue_id for record in records}) == 4
     assert records[-2].status == "failed"
+    assert records[-2].last_status_reason == "repaired invalid queue status"
     assert records[-1].attempts == 0
+    assert records[-1].last_status_reason is None
     assert validate_queue(str(tmp_path)).ok
 
 
@@ -187,6 +206,7 @@ def test_recover_remove_and_clear_queue_records(tmp_path):
     loaded = load_queue(str(tmp_path))
     assert loaded[0].status == "pending"
     assert loaded[0].last_error == "recovered from stale running state"
+    assert loaded[0].last_status_reason == "recovered from stale running state"
 
     assert remove_queue_records(["q3"], str(tmp_path)) == 1
     assert [record.queue_id for record in load_queue(str(tmp_path))] == ["q1", "q2"]
@@ -203,22 +223,102 @@ def test_clear_queue_requires_status_or_all(tmp_path):
         clear_queue(cache_dir=str(tmp_path))
 
 
-def test_mark_records_running_increments_attempts(tmp_path):
-    from pdman.queue import start_queue_records
+def test_select_queue_records_filters_retry_policy():
+    records = [
+        QueueRecord(
+            queue_id="q1",
+            url="https://example.com/a.bin",
+            status="failed",
+            attempts=1,
+            last_error="HTTP 503 during header check",
+        ),
+        QueueRecord(
+            queue_id="q2",
+            url="https://example.com/b.bin",
+            status="failed",
+            attempts=3,
+            last_error="Connection timed out",
+        ),
+        QueueRecord(
+            queue_id="q3",
+            url="https://example.com/c.bin",
+            status="completed",
+            attempts=1,
+        ),
+    ]
 
-    records = [QueueRecord(queue_id="q1", url="https://example.com/a.bin")]
+    assert [record.queue_id for record in select_queue_records(records, status="failed")] == ["q1", "q2"]
+    assert [record.queue_id for record in select_queue_records(records, status="failed", max_attempts=3)] == ["q1"]
+    assert [record.queue_id for record in select_queue_records(records, status="failed", error_contains="http 503")] == ["q1"]
+    assert [record.queue_id for record in select_queue_records(records, attempts_ge=3)] == ["q2"]
+    assert [record.queue_id for record in select_queue_records(records, attempts_lt=2)] == ["q1", "q3"]
+
+
+def test_retry_failed_candidates_do_not_mutate_queue(tmp_path):
+    records = [
+        QueueRecord(
+            queue_id="q1",
+            url="https://example.com/a.bin",
+            status="failed",
+            attempts=1,
+            last_error="HTTP 503 during header check",
+        ),
+        QueueRecord(
+            queue_id="q2",
+            url="https://example.com/b.bin",
+            status="failed",
+            attempts=3,
+            last_error="Connection timed out",
+        ),
+    ]
+    rewrite_queue(records, str(tmp_path))
+
+    candidates = retry_failed_candidates(
+        cache_dir=str(tmp_path),
+        max_attempts=3,
+        error_contains="503",
+    )
+
+    assert [record.queue_id for record in candidates] == ["q1"]
+    assert load_queue(str(tmp_path))[0].attempts == 1
+
+
+def test_mark_records_running_increments_attempts_and_respects_filters(tmp_path):
+    records = [
+        QueueRecord(
+            queue_id="q1",
+            url="https://example.com/a.bin",
+            status="failed",
+            attempts=1,
+            last_error="HTTP 503 during header check",
+        ),
+        QueueRecord(
+            queue_id="q2",
+            url="https://example.com/b.bin",
+            status="failed",
+            attempts=3,
+            last_error="Connection timed out",
+        ),
+    ]
     rewrite_queue(records, str(tmp_path))
 
     selected = start_queue_records(
         cache_dir=str(tmp_path),
-        status="pending",
+        status="failed",
         limit=1,
         run_id="run-1",
+        max_attempts=3,
+        error_contains="503",
     )
 
+    loaded = load_queue(str(tmp_path))
+    assert [record.queue_id for record in selected] == ["q1"]
     assert selected[0].status == "running"
-    assert selected[0].attempts == 1
-    assert load_queue(str(tmp_path))[0].attempts == 1
+    assert selected[0].attempts == 2
+    assert selected[0].last_error is None
+    assert loaded[0].attempts == 2
+    assert loaded[0].last_status_reason is None
+    assert loaded[1].attempts == 3
 
 
 def test_update_queue_from_results_completed_and_failed():
@@ -247,10 +347,12 @@ def test_update_queue_from_results_completed_and_failed():
     assert [record.status for record in updated] == ["completed", "failed"]
     assert [record.last_run_id for record in updated] == ["run-1", "run-1"]
     assert updated[0].last_error is None
+    assert updated[0].last_status_reason == "download completed"
     assert updated[1].last_error == "HTTP 503 during header check"
+    assert updated[1].last_status_reason == "HTTP 503 during header check"
 
 
-def test_format_queue_includes_status_and_error():
+def test_format_queue_includes_status_error_attempts_and_custom_title():
     text = format_queue(
         [
             QueueRecord(
@@ -260,9 +362,11 @@ def test_format_queue_includes_status_and_error():
                 status="failed",
                 last_error="HTTP 503 during header check",
             )
-        ]
+        ],
+        title="Retry candidates:",
     )
 
+    assert text.startswith("Retry candidates:")
     assert "failed" in text
     assert "q1" in text
     assert "a.bin" in text

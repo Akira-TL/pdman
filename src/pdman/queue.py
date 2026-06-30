@@ -54,6 +54,7 @@ class QueueRecord:
     updated_at: str | None = None
     last_run_id: str | None = None
     last_error: str | None = None
+    last_status_reason: str | None = None
     attempts: int = 0
     schema_version: int = QUEUE_SCHEMA_VERSION
 
@@ -92,6 +93,7 @@ class QueueRecord:
             updated_at=data.get("updated_at"),
             last_run_id=data.get("last_run_id"),
             last_error=data.get("last_error"),
+            last_status_reason=data.get("last_status_reason"),
             attempts=int(data.get("attempts", 0) or 0),
         )
 
@@ -169,17 +171,60 @@ def rewrite_queue(records: list[QueueRecord], cache_dir: str | None = None) -> N
         _rewrite_queue_unlocked(records, cache_dir)
 
 
+def select_queue_records(
+    records: list[QueueRecord],
+    *,
+    status: str | None = None,
+    limit: int = 0,
+    max_attempts: int | None = None,
+    error_contains: str | None = None,
+    attempts_ge: int | None = None,
+    attempts_lt: int | None = None,
+) -> list[QueueRecord]:
+    if status is not None and status not in QUEUE_STATUSES:
+        raise ValueError(f"Invalid queue status: {status}")
+    if max_attempts is not None and max_attempts < 0:
+        raise ValueError("max_attempts cannot be negative")
+    if attempts_ge is not None and attempts_ge < 0:
+        raise ValueError("attempts_ge cannot be negative")
+    if attempts_lt is not None and attempts_lt < 0:
+        raise ValueError("attempts_lt cannot be negative")
+
+    selected = records
+    if status:
+        selected = [record for record in selected if record.status == status]
+    if max_attempts is not None:
+        selected = [record for record in selected if record.attempts < max_attempts]
+    if attempts_ge is not None:
+        selected = [record for record in selected if record.attempts >= attempts_ge]
+    if attempts_lt is not None:
+        selected = [record for record in selected if record.attempts < attempts_lt]
+    if error_contains:
+        needle = error_contains.lower()
+        selected = [
+            record
+            for record in selected
+            if record.last_error and needle in record.last_error.lower()
+        ]
+    if limit and limit > 0:
+        selected = selected[:limit]
+    return selected
+
+
 def query_queue(
     cache_dir: str | None = None,
     *,
     status: str | None = None,
     last: int = 20,
+    attempts_ge: int | None = None,
+    attempts_lt: int | None = None,
 ) -> list[QueueRecord]:
-    if status is not None and status not in QUEUE_STATUSES:
-        raise ValueError(f"Invalid queue status: {status}")
-    records = load_queue(cache_dir)
-    if status:
-        records = [record for record in records if record.status == status]
+    records = select_queue_records(
+        load_queue(cache_dir),
+        status=status,
+        attempts_ge=attempts_ge,
+        attempts_lt=attempts_lt,
+    )
     if last is not None and last > 0:
         records = records[-last:]
     return records
@@ -327,6 +372,7 @@ def repair_queue(cache_dir: str | None = None) -> dict[str, int]:
             if data.get("status", "pending") not in QUEUE_STATUSES:
                 data["status"] = "failed"
                 data["last_error"] = "repaired invalid queue status"
+                data["last_status_reason"] = "repaired invalid queue status"
                 fixed = True
             try:
                 attempts = int(data.get("attempts", 0) or 0)
@@ -337,6 +383,9 @@ def repair_queue(cache_dir: str | None = None) -> dict[str, int]:
                 attempts = 0
                 fixed = True
             data["attempts"] = attempts
+            if "last_status_reason" not in data:
+                data["last_status_reason"] = None
+                fixed = True
             if not data.get("created_at"):
                 data["created_at"] = now
                 fixed = True
@@ -366,6 +415,7 @@ def recover_running(cache_dir: str | None = None) -> int:
             if record.status == "running":
                 record.status = "pending"
                 record.last_error = "recovered from stale running state"
+                record.last_status_reason = "recovered from stale running state"
                 record.updated_at = now
                 recovered += 1
         if recovered:
@@ -427,6 +477,7 @@ def mark_records_running(records: list[QueueRecord], run_id: str) -> None:
         record.status = "running"
         record.last_run_id = run_id
         record.last_error = None
+        record.last_status_reason = None
         record.attempts += 1
         record.updated_at = now
 
@@ -458,13 +509,13 @@ def update_queue_from_results(
                 break
         if result_index is None:
             record.status = "failed"
-            record.last_error = "task did not produce a result"
+            reason = "task did not produce a result"
         else:
             result = remaining_results.pop(result_index)
             record.status = _result_status(result)
-            record.last_error = (
-                result.reason or result.error if record.status == "failed" else None
-            )
+            reason = result.reason or result.error
+        record.last_status_reason = reason
+        record.last_error = reason if record.status == "failed" else None
         record.last_run_id = run_id
         record.updated_at = now
     return records
@@ -476,16 +527,38 @@ def start_queue_records(
     status: str,
     limit: int,
     run_id: str,
+    max_attempts: int | None = None,
+    error_contains: str | None = None,
 ) -> list[QueueRecord]:
     with queue_lock(cache_dir):
         records = load_queue(cache_dir)
-        selected = [record for record in records if record.status == status]
-        if limit and limit > 0:
-            selected = selected[:limit]
+        selected = select_queue_records(
+            records,
+            status=status,
+            limit=limit,
+            max_attempts=max_attempts,
+            error_contains=error_contains,
+        )
         if selected:
             mark_records_running(selected, run_id)
             _rewrite_queue_unlocked(records, cache_dir)
         return selected
+
+
+def retry_failed_candidates(
+    *,
+    cache_dir: str | None,
+    limit: int = 0,
+    max_attempts: int | None = None,
+    error_contains: str | None = None,
+) -> list[QueueRecord]:
+    return select_queue_records(
+        load_queue(cache_dir),
+        status="failed",
+        limit=limit,
+        max_attempts=max_attempts,
+        error_contains=error_contains,
+    )
 
 
 def finish_queue_records(
@@ -504,10 +577,12 @@ def finish_queue_records(
         return records
 
 
-def format_queue(records: list[QueueRecord]) -> str:
+def format_queue(records: list[QueueRecord], title: str = "Queue:") -> str:
     if not records:
-        return "No queue records found."
-    lines = ["Queue:"]
+        if title == "Queue:":
+            return "No queue records found."
+        return title.replace(":", " records") + " not found."
+    lines = [title]
     for record in records:
         name = record.file_name or record.url
         suffix = f" - {record.last_error}" if record.last_error and record.status == "failed" else ""
