@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 from pdman.chunk import Chunk
 from pdman.downloader import Downloader
@@ -311,6 +312,110 @@ def test_rebuild_task_rejects_mismatched_resume_metadata(tmp_path):
 
         assert await downloader.rebuild_task() is None
         assert not partial_path.exists()
+
+    asyncio.run(run_case())
+
+
+def test_rebuild_task_warns_when_using_legacy_pdm_fallback(tmp_path):
+    async def run_case():
+        manager = Manager(continue_download=True, log_path=None)
+        tmp_dir = tmp_path / "tmp"
+        tmp_dir.mkdir()
+        partial_path = tmp_dir / "file.bin.0"
+        partial_path.write_bytes(b"abc")
+        (tmp_dir / ".pdm").write_text(
+            json.dumps(
+                {
+                    "url": "https://example.com/file.bin",
+                    "filename": "file.bin",
+                    "md5": None,
+                    "file_size": 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_dir),
+        )
+        downloader.file_size = 5
+        downloader.header_info = {}
+        warnings = []
+        downloader._logger = SimpleNamespace(warning=warnings.append)
+
+        root = await downloader.rebuild_task()
+
+        assert root is not None
+        assert root.start == 0
+        assert root.end == 4
+        assert root.size == 3
+        assert any("Legacy .pdm resume fallback" in item for item in warnings)
+
+    asyncio.run(run_case())
+
+
+def test_rebuild_task_does_not_fallback_to_legacy_pdm_after_v2_rejection(tmp_path):
+    async def run_case():
+        manager = Manager(continue_download=True, log_path=None)
+        tmp_dir = tmp_path / "tmp"
+        tmp_dir.mkdir()
+        partial_path = tmp_dir / "file.bin.0"
+        partial_path.write_bytes(b"abcde")
+        (tmp_dir / ".pdm").write_text(
+            json.dumps(
+                {
+                    "url": "https://example.com/file.bin",
+                    "filename": "file.bin",
+                    "md5": None,
+                    "file_size": 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+        payload = {
+            "schema_version": 2,
+            "kind": "resume",
+            "mode": "static",
+            "url": "https://example.com/other.bin",
+            "filename": "file.bin",
+            "target_path": str(tmp_path / "file.bin"),
+            "file_size": 5,
+            "etag": None,
+            "last_modified": None,
+            "created_at": None,
+            "updated_at": None,
+            "segments": [
+                {
+                    "index": 0,
+                    "start": 0,
+                    "end": 4,
+                    "path": str(partial_path),
+                    "expected_size": 5,
+                    "existing_size": 5,
+                    "state": "completed",
+                }
+            ],
+        }
+        (tmp_dir / RESUME_METADATA_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_dir),
+        )
+        downloader.file_size = 5
+        downloader.header_info = {}
+        warnings = []
+        downloader._logger = SimpleNamespace(warning=warnings.append)
+
+        assert await downloader.rebuild_task() is None
+        assert not partial_path.exists()
+        assert any("Resume rejected [url_mismatch]" in item for item in warnings)
+        assert not any("Legacy .pdm resume fallback" in item for item in warnings)
 
     asyncio.run(run_case())
 
