@@ -272,7 +272,26 @@ v0.4.0 引入 runtime 目录管理，目标是把 payload 临时文件和非 pay
 
 兼容性说明：启用 `--continue` 且目标目录中存在旧版 `.pdman.<task-id>/.pdm` 时，pdman 会优先使用旧目录继续下载，避免破坏 v0.3.x 已存在的续传状态。
 
-v0.4.0 只提供 runtime 目录和 history/current-run 基础，不提供 history 查询命令、queue 命令、daemon 模式、JSON/JSONL 输出或 agent event stream。这些内容放到后续 0.4.x/0.9.x 修订版本。
+v0.4.0 只提供 runtime 目录和 history/current-run 基础，不提供 queue 命令、daemon 模式、JSON/JSONL 输出或 agent event stream。这些内容放到后续 0.4.x/0.9.x 修订版本。
+
+### 7.1 History 查询命令
+
+v0.4.1 提供只读查询命令，用于查看 `history.jsonl` 和 `runs/<run-id>.json`：
+
+```bash
+pdman history
+pdman history --last 50
+pdman history --failed
+pdman history --status completed
+pdman history --run-id <run-id>
+pdman runs
+pdman runs --last 10
+pdman run <run-id>
+```
+
+所有查询命令都支持 `--cache-dir DIR`，用于读取非默认 cache 目录。查询命令只读 history/run metadata，不会启动下载任务，也不会修改任务状态。
+
+v0.4.1 不提供 history 删除、时间范围过滤、active run 查询、retry failed 或 queue 操作。
 
 ---
 

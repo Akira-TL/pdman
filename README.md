@@ -226,6 +226,23 @@ pdman --cache-dir /data/cache/pdman "https://example.com/file.bin"
 - `--tmp-policy target` 保留旧行为，在目标目录旁创建 `.pdman.<sha>`。
 - `--cache-dir` 覆盖默认 `~/.cache/pdman`。
 
+### 历史查询命令
+
+v0.4.1 开始，可以直接查询 runtime history 和 run summary。
+
+```bash
+pdman history
+pdman history --last 50
+pdman history --failed
+pdman history --status completed
+pdman history --run-id <run-id>
+pdman runs
+pdman runs --last 10
+pdman run <run-id>
+```
+
+这些命令只读取 `~/.cache/pdman` 中的历史记录，不会启动下载任务。也可以用 `--cache-dir DIR` 查询自定义 cache 目录。
+
 ### 任务结果与退出码
 
 每次运行结束后，pdman 会汇总任务结果：
