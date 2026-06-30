@@ -256,6 +256,24 @@ def test_dynamic_segment_download_validates_md5(tmp_path):
         assert manager.exit_code == 0
 
 
+def test_cli_single_url_out_respects_dir(tmp_path):
+    with LocalDownloadServer() as server:
+        download_dir = tmp_path / "downloads"
+        exit_code = cli.main(
+            [
+                "-d",
+                str(download_dir),
+                "-o",
+                "renamed.bin",
+                server.url("/normal.bin"),
+            ]
+        )
+
+        assert exit_code == 0
+        assert (download_dir / "renamed.bin").read_bytes() == PAYLOAD
+        assert not (tmp_path / "renamed.bin").exists()
+
+
 def test_cli_dynamic_segment_download(tmp_path):
     with LocalDownloadServer() as server:
         exit_code = cli.main(

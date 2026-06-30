@@ -739,7 +739,7 @@ def main(argv=None):
     )
 
     if args.urls and len(args.urls) == 1 and args.out is not None:
-        pdman.append(args.urls[0], file_name=args.out)
+        pdman.append(args.urls[0], file_name=args.out, dir_path=args.dir)
     else:
         if args.out is not None:
             pass  # ignore --out when multiple urls
