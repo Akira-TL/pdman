@@ -154,6 +154,8 @@ class Downloader:
         self.metadata_lock = asyncio.Lock()
         self.resume_metadata_lock = asyncio.Lock()
         self.header_info = None
+        self.header_probe_method: str | None = None
+        self.header_probe_fallback_reason: str | None = None
         self.log_path = log_path
         self._downloaded = False
         self._done = False
@@ -541,6 +543,8 @@ class Downloader:
                 return headers
             if parsed.total is not None:
                 headers["Content-Length"] = str(parsed.total)
+            else:
+                headers.pop("Content-Length", None)
         return headers
 
     async def _get_headers_via_get_probe(
@@ -568,6 +572,8 @@ class Downloader:
         self.set_status(TaskStatus.HEADER_CHECKING)
         async with self._build_client_session() as session:
             headers_to_send = self.build_request_headers()
+            self.header_probe_method = "HEAD"
+            self.header_probe_fallback_reason = None
             try:
                 async with session.head(
                     self.url,
@@ -583,15 +589,18 @@ class Downloader:
                             response.status,
                             getattr(response, "reason", None),
                         )
+                    self.header_probe_fallback_reason = f"head_http_{response.status}"
                     self._logger.warning(
                         "HEAD header probe returned "
                         f"HTTP {response.status}; falling back to GET probe"
                     )
             except aiohttp.ClientConnectionError as e:
+                self.header_probe_fallback_reason = "head_connection_error"
                 self._logger.warning(
                     "HEAD header probe failed with connection error; "
                     f"falling back to GET probe: {e}"
                 )
+            self.header_probe_method = "GET"
             return await self._get_headers_via_get_probe(session, headers_to_send)
 
     async def get_url_file_size(self) -> int:
