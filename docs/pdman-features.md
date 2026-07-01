@@ -311,6 +311,16 @@ v0.7.1 对 probe 边界做了补强：
 - GET probe 如果返回 `206` 且 `Content-Range` total 为 `*`，会丢弃 probe 响应自身的 `Content-Length`，按未知文件大小处理，避免把 `Range: bytes=0-0` 的 1-byte probe 误当成完整文件。
 - `Downloader.header_probe_method` 与 `Downloader.header_probe_fallback_reason` 目前是内部诊断字段，不进入稳定 JSON/JSONL 输出 contract。
 
+v0.7.2 将 request probe fallback 诊断接入任务结果和历史记录：
+
+- `TaskResult` 新增 `header_probe_method` 和 `header_probe_fallback_reason`。
+- runtime history / run task record 会写入这两个原始字段。
+- history JSON 和 run JSON 的 task payload 会增加 `header_probe` 对象：`{method, fallback_used, fallback_reason}`。
+- human summary、history readable 和 run detail readable 只在发生 fallback 时显示 `Probe: GET fallback=<reason>`。
+- queue record 暂不复制该诊断字段，避免扩大 queue schema；失败队列仍以 status、attempts、last_error 为主。
+
+v0.7.2 只扩展诊断面，不新增 CLI 参数，不改变 v0.7.0/v0.7.1 的 HEAD/GET 请求策略，也不改变 resume metadata 或 dynamic recovery 边界。
+
 ---
 
 ## 6. 回调命令

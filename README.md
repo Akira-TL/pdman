@@ -197,6 +197,8 @@ v0.7.0 起，header 探测策略改为默认先发 `HEAD`；如果 `HEAD` 返回
 
 v0.7.1 起，请求探测边界进一步收紧：HEAD 直接断连会进入 GET probe fallback；如果 GET probe 被服务端忽略 Range 并返回 `200`，pdman 使用该响应的完整 `Content-Length`；如果 GET probe 返回 `206` 但 `Content-Range` total 为 `*`，pdman 会忽略 probe 自身的 `Content-Length: 1` 并按未知文件大小处理，避免只下载 1 byte。
 
+v0.7.2 起，HEAD→GET fallback 会进入任务诊断：`TaskResult`、runtime history 和 history/run JSON 输出会包含 `header_probe_method`、`header_probe_fallback_reason`，JSON payload 还会提供归一化的 `header_probe` 对象。human summary、history 和 run detail 会在发生 fallback 时显示 `Probe: GET fallback=<reason>`。该版本只暴露诊断，不新增 CLI 参数，也不改变请求策略。
+
 ### 重试与超时
 
 ```bash
