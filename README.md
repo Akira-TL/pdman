@@ -199,6 +199,8 @@ v0.7.1 起，请求探测边界进一步收紧：HEAD 直接断连会进入 GET 
 
 v0.7.2 起，HEAD→GET fallback 会进入任务诊断：`TaskResult`、runtime history 和 history/run JSON 输出会包含 `header_probe_method`、`header_probe_fallback_reason`，JSON payload 还会提供归一化的 `header_probe` 对象。human summary、history 和 run detail 会在发生 fallback 时显示 `Probe: GET fallback=<reason>`。该版本只暴露诊断，不新增 CLI 参数，也不改变请求策略。
 
+v0.7.3 起，probe fallback reason code 被固定为公开诊断 contract：`head_http_403`、`head_http_404`、`head_http_405`、`head_http_501` 和 `head_connection_error`。HTTP reason 只会在这些允许 fallback 的 HEAD 状态中出现；`408/425/429/5xx` 仍然不会 fallback，会保留 retry / failed 语义。
+
 ### 重试与超时
 
 ```bash

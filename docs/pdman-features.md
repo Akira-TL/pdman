@@ -321,6 +321,30 @@ v0.7.2 将 request probe fallback 诊断接入任务结果和历史记录：
 
 v0.7.2 只扩展诊断面，不新增 CLI 参数，不改变 v0.7.0/v0.7.1 的 HEAD/GET 请求策略，也不改变 resume metadata 或 dynamic recovery 边界。
 
+v0.7.3 固定 `header_probe_fallback_reason` 的 reason code contract：
+
+| reason code | 触发条件 | 行为 |
+| --- | --- | --- |
+| `head_http_403` | HEAD 返回 403 | fallback 到 GET probe |
+| `head_http_404` | HEAD 返回 404 | fallback 到 GET probe |
+| `head_http_405` | HEAD 返回 405 | fallback 到 GET probe |
+| `head_http_501` | HEAD 返回 501 | fallback 到 GET probe |
+| `head_connection_error` | HEAD 请求发生连接类错误，例如服务端直接断连 | fallback 到 GET probe |
+
+明确不 fallback 的状态包括 `408`、`425`、`429`、`500`、`502`、`503`、`504`。这些状态保留为 header check failure / retry 语义，避免把临时服务端故障或限流误判成可下载资源。
+
+`header_probe` JSON 对象结构稳定为：
+
+```json
+{
+  "method": "GET",
+  "fallback_used": true,
+  "fallback_reason": "head_http_405"
+}
+```
+
+未发生 fallback 时，`fallback_used=false`，`fallback_reason=null`；`method` 可能为 `HEAD` 或 `null`，取决于记录来源是否包含 probe method。v0.7.3 不把这些字段写入 queue record，也不新增用户控制开关。
+
 ---
 
 ## 6. 回调命令
