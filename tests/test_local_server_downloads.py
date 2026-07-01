@@ -1178,6 +1178,9 @@ def test_slow_head_is_failed_after_connection_timeout(tmp_path):
         assert not list(tmp_path.glob(".pdman.*"))
         assert manager.results[0].status == TaskStatus.FAILED
         assert manager.results[0].reason_code == TaskReason.CONNECTION_TIMEOUT
+        assert manager.results[0].network_error_phase == "connect"
+        assert manager.results[0].network_error_kind == "connection_timeout"
+        assert manager.results[0].network_http_status is None
         assert manager.exit_code == 1
 
 
@@ -1201,6 +1204,9 @@ def test_unreachable_local_port_is_skipped(tmp_path):
     assert not list(tmp_path.glob(".pdman.*"))
     assert manager.results[0].status == TaskStatus.FAILED
     assert manager.results[0].reason_code == TaskReason.CONNECTION_FAILED
+    assert manager.results[0].network_error_phase == "connect"
+    assert manager.results[0].network_error_kind == "connection_failed"
+    assert manager.results[0].network_http_status is None
     assert manager.exit_code == 1
 
 
