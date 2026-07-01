@@ -4,6 +4,10 @@ import os
 import pytest
 
 import pdman.cli as cli
+from pdman.range_metadata_inspect import (
+    find_latest_range_metadata,
+    find_latest_range_metadata_diagnostics,
+)
 
 
 def metadata_payload():
@@ -162,6 +166,44 @@ def test_cli_debug_ranges_wrong_schema_exits_non_zero(tmp_path, capsys):
     output = capsys.readouterr().out
     assert exit_code == 1
     assert "Unsupported dynamic range metadata schema_version" in output
+
+
+def test_range_latest_diagnostics_selects_newest_valid_and_counts_invalid(tmp_path):
+    older_dir = tmp_path / "old"
+    newer_dir = tmp_path / "new"
+    invalid_dir = tmp_path / "invalid"
+    older_dir.mkdir()
+    newer_dir.mkdir()
+    invalid_dir.mkdir()
+    older = write_metadata(older_dir)
+    newer = write_metadata(newer_dir)
+    invalid = invalid_dir / "dynamic-ranges.json"
+    invalid.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+    os.utime(invalid, (300, 300))
+
+    search = find_latest_range_metadata_diagnostics([tmp_path])
+
+    assert search.roots == [str(tmp_path)]
+    assert search.selected_path == newer
+    assert search.valid_count == 2
+    assert search.skipped_invalid_count == 1
+    assert find_latest_range_metadata([tmp_path]) == newer
+
+
+
+def test_range_latest_diagnostics_handles_file_root_and_missing_root(tmp_path):
+    valid = write_metadata(tmp_path)
+    missing_root = tmp_path / "missing"
+
+    search = find_latest_range_metadata_diagnostics([missing_root, valid])
+
+    assert search.roots == [str(missing_root), str(valid)]
+    assert search.selected_path == valid
+    assert search.valid_count == 1
+    assert search.skipped_invalid_count == 0
+
 
 
 def test_cli_debug_ranges_latest_uses_newest_metadata(tmp_path, capsys):
