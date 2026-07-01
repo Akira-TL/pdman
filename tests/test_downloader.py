@@ -28,6 +28,62 @@ def test_header_probe_reason_contract():
     assert HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR == "head_connection_error"
 
 
+class FakeProgress:
+    def __init__(self):
+        self.added = []
+        self.updated = []
+        self.stopped = []
+
+    def add_task(self, description, **kwargs):
+        task_id = len(self.added) + 1
+        self.added.append((task_id, description, kwargs))
+        return task_id
+
+    def update(self, task_id, **kwargs):
+        self.updated.append((task_id, kwargs))
+
+    def stop_task(self, task_id):
+        self.stopped.append(task_id)
+
+
+def test_downloader_reuses_one_progress_task_for_retries(tmp_path):
+    progress = FakeProgress()
+    parent = SimpleNamespace(_progress=progress)
+    downloader = Downloader(
+        parent,
+        "https://example.com/file.bin",
+        str(tmp_path),
+        filename="file.bin",
+    )
+
+    first_task = downloader._ensure_progress_task(
+        "Downloading file.bin", total=100, completed=0, dl=16
+    )
+    retry_task = downloader._ensure_progress_task(
+        "Downloading file.bin", total=100, completed=25, dl=15
+    )
+    downloader.record_result(
+        TaskStatus.FAILED,
+        reason="failed after retries",
+        reason_code=TaskReason.UNEXPECTED_ERROR,
+    )
+
+    assert retry_task == first_task
+    assert [item[0] for item in progress.added] == [first_task]
+    assert progress.updated == [
+        (
+            first_task,
+            {
+                "description": "Downloading file.bin",
+                "total": 100,
+                "completed": 25,
+                "dl": 15,
+            },
+        )
+    ]
+    assert progress.stopped == [first_task]
+
+
 def test_downloader_dynamic_segment_support_checks(tmp_path):
     manager = Manager(
         segment_mode="dynamic",
