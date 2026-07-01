@@ -187,6 +187,8 @@ v0.6.11 起，`pdman debug resume --metadata <path>` 可只读 inspect `resume-m
 
 v0.6.12 起，`pdman debug resume --latest` 会在 system tmp root、cache root 和额外 `--search-root` 中寻找最新有效的 `resume-metadata.json`。该发现逻辑仍然只读，不读取 `dynamic-ranges.json`，也不恢复、修复或迁移 tmp。
 
+v0.6.13 起，`pdman debug resume` 支持 `--state completed|partial|pending|failed`。readable 输出会显示 filter 和 filtered 统计，`--json` 输出包含 `filter`、`count`、`filtered_stats` 和匹配 segments，`--jsonl` 只输出匹配 segment。
+
 ### 重试与超时
 
 ```bash

@@ -171,10 +171,11 @@ Use:
 pdman debug resume --metadata /path/to/resume-metadata.json
 pdman debug resume --metadata /path/to/resume-metadata.json --json
 pdman debug resume --metadata /path/to/resume-metadata.json --jsonl
+pdman debug resume --metadata /path/to/resume-metadata.json --state partial --json
 pdman debug resume --latest --search-root /path/to/tmp --json
 ```
 
-This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the system tmp root, cache root, and any extra `--search-root` values for the newest valid `resume-metadata.json`.
+This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the system tmp root, cache root, and any extra `--search-root` values for the newest valid `resume-metadata.json`. With `--state`, readable output shows filter and filtered stats, JSON output includes `filter`, `count`, and `filtered_stats`, and JSONL emits only matching segments.
 
 ### For dynamic allocator debugging
 
