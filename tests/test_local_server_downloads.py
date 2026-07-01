@@ -57,6 +57,25 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                 return
             self._send_payload(PAYLOAD, "head-501-get-ok.bin", send_body)
             return
+        if parsed.path == "/head-close-get-ok.bin":
+            if not send_body:
+                self.close_connection = True
+                self.connection.close()
+                return
+            self._send_payload(PAYLOAD, "head-close-get-ok.bin", send_body)
+            return
+        if parsed.path == "/head-501-get-ignored-range.bin":
+            if not send_body:
+                self._send_text(501, b"HEAD not implemented")
+                return
+            self._send_ignored_range_payload(PAYLOAD, "head-501-get-ignored-range.bin", send_body)
+            return
+        if parsed.path == "/head-501-get-unknown-total.bin":
+            if not send_body:
+                self._send_text(501, b"HEAD not implemented")
+                return
+            self._send_unknown_total_range_probe(PAYLOAD, "head-501-get-unknown-total.bin")
+            return
         if parsed.path == "/uneven.bin":
             self._send_payload(UNEVEN_PAYLOAD, "uneven.bin", send_body)
             return
@@ -202,6 +221,25 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if send_body:
             self.wfile.write(body)
+
+    def _send_unknown_total_range_probe(self, data: bytes, filename: str):
+        range_header = self.headers.get("Range")
+        if range_header:
+            self.send_response(206)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", "1")
+            self.send_header("Content-Range", "bytes 0-0/*")
+            self.end_headers()
+            self.wfile.write(data[:1])
+            return
+        self.send_response(200)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+        self.close_connection = True
 
     def _send_unknown_size(self, send_body: bool):
         self.send_response(200)
@@ -1214,6 +1252,66 @@ def test_head_501_get_fallback_preserves_file_size_for_dynamic(tmp_path):
         assert (tmp_path / "fallback-dynamic.bin").read_bytes() == PAYLOAD
         assert manager.results[0].status == TaskStatus.COMPLETED
         assert manager.results[0].total_bytes == len(PAYLOAD)
+        assert manager.exit_code == 0
+
+
+def test_head_connection_close_falls_back_to_get_probe(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            retry=1,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/head-close-get-ok.bin"),
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "head-close-get-ok.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].filename == "head-close-get-ok.bin"
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_get_probe_200_ignored_range_preserves_full_content_length(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            retry=1,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/head-501-get-ignored-range.bin"),
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "head-501-get-ignored-range.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].total_bytes == len(PAYLOAD)
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_get_probe_206_unknown_total_does_not_treat_probe_size_as_file_size(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            retry=1,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/head-501-get-unknown-total.bin"),
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "head-501-get-unknown-total.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].total_bytes is None
+        assert manager.results[0].status == TaskStatus.COMPLETED
         assert manager.exit_code == 0
 
 
