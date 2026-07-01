@@ -3,9 +3,13 @@ import json
 from types import SimpleNamespace
 
 from pdman.chunk import Chunk
-from pdman.downloader import Downloader, HeaderStatusSkip, header_probe_http_fallback_reason
+from pdman.downloader import (
+    HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR,
+    Downloader,
+    HeaderStatusSkip,
+    header_probe_http_fallback_reason,
+)
 from pdman.manager import Manager
-from pdman.downloader import HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR
 from pdman.resume_metadata import RESUME_METADATA_FILENAME, static_resume_metadata_payload
 from pdman.status import TaskReason, TaskStatus
 

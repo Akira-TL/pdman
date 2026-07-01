@@ -47,6 +47,13 @@ from .runtime import TmpSpaceInsufficient
 from .status import TaskReason, TaskResult, TaskStatus
 
 
+HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR = "head_connection_error"
+
+
+def header_probe_http_fallback_reason(status: int) -> str:
+    return f"head_http_{status}"
+
+
 class ConnectionTimeoutSkip(Exception):
     def __init__(
         self,
@@ -591,13 +598,17 @@ class Downloader:
                             response.status,
                             getattr(response, "reason", None),
                         )
-                    self.header_probe_fallback_reason = f"head_http_{response.status}"
+                    self.header_probe_fallback_reason = header_probe_http_fallback_reason(
+                        response.status
+                    )
                     self._logger.warning(
                         "HEAD header probe returned "
                         f"HTTP {response.status}; falling back to GET probe"
                     )
             except aiohttp.ClientConnectionError as e:
-                self.header_probe_fallback_reason = "head_connection_error"
+                self.header_probe_fallback_reason = (
+                    HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR
+                )
                 self._logger.warning(
                     "HEAD header probe failed with connection error; "
                     f"falling back to GET probe: {e}"
