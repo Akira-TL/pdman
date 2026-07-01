@@ -281,6 +281,8 @@ v0.6.9 为 `pdman run <run_id>` 增加 `--json`，输出 run 摘要、tasks 和�
 
 v0.6.10 新增 `docs/resume-diagnostics.md`，集中说明 resume diagnostics contract、rejection code、history/run JSON 读取方式，以及 `resume-metadata.json` 和 `dynamic-ranges.json` 的职责边界。该版本只做文档收束，不改变恢复、history、run 或 debug ranges 行为。
 
+v0.6.11 新增 `pdman debug resume --metadata <path>`，用于只读 inspect `resume-metadata.json`，并支持 readable、`--json`、`--jsonl` 输出。该命令不恢复下载、不修改 tmp、不自动发现 metadata，也不读取 `dynamic-ranges.json`。
+
 ---
 
 ## 6. 回调命令

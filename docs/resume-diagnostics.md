@@ -163,6 +163,18 @@ pdman run <run_id>
 
 Human output remains readable and includes resume rejection text when present. Scripts should prefer JSON/JSONL instead of parsing human output.
 
+### For direct resume metadata inspection
+
+Use:
+
+```bash
+pdman debug resume --metadata /path/to/resume-metadata.json
+pdman debug resume --metadata /path/to/resume-metadata.json --json
+pdman debug resume --metadata /path/to/resume-metadata.json --jsonl
+```
+
+This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files, does not recover downloads, and does not auto-discover metadata.
+
 ### For dynamic allocator debugging
 
 Use:
