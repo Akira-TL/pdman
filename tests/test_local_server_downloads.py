@@ -130,6 +130,14 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                     return
             self._send_payload(PAYLOAD, "flaky-range.bin", send_body)
             return
+        if parsed.path == "/range-status.bin":
+            status = int(parse_qs(parsed.query).get("status", ["503"])[0])
+            range_header = self.headers.get("Range")
+            if send_body and range_header:
+                self._send_text(status, f"range HTTP {status}".encode())
+                return
+            self._send_payload(PAYLOAD, "range-status.bin", send_body)
+            return
         if parsed.path == "/slow-range-once.bin":
             range_header = self.headers.get("Range")
             if send_body and range_header:
@@ -446,6 +454,9 @@ def test_dynamic_segment_download_rejects_bad_content_range(tmp_path):
         assert not (tmp_path / "bad-content-range.bin").exists()
         assert manager.results[0].status == TaskStatus.FAILED
         assert "Content-Range start mismatch" in (manager.results[0].error or "")
+        assert manager.results[0].network_error_phase == "range_dynamic"
+        assert manager.results[0].network_error_kind == "range_response"
+        assert manager.results[0].network_http_status == 206
         assert manager.exit_code == 1
 
 
@@ -572,7 +583,37 @@ def test_dynamic_segment_download_rejects_short_range_body(tmp_path):
         assert not (tmp_path / "short-range.bin").exists()
         assert manager.results[0].status == TaskStatus.FAILED
         assert "incomplete" in (manager.results[0].error or "")
+        assert manager.results[0].network_error_phase == "range_dynamic"
+        assert manager.results[0].network_error_kind == "range_incomplete"
+        assert manager.results[0].network_http_status is None
         assert manager.exit_code == 1
+
+
+def test_static_segment_download_records_range_static_for_range_http_failure(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="static",
+            retry=1,
+            retry_wait=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/range-status.bin?status=503"),
+            file_name="static-range-http-failed.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "static-range-http-failed.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.results[0].network_error_phase == "range_static"
+        assert manager.results[0].network_error_kind == "http_status"
+        assert manager.results[0].network_http_status == 503
+        assert manager.exit_code == 1
+
 
 
 def test_dynamic_segment_download_recovers_flaky_ranges(tmp_path):
@@ -619,6 +660,9 @@ def test_dynamic_segment_download_fails_after_range_retry_limit(tmp_path):
 
         assert not (tmp_path / "dynamic-range-failed.bin").exists()
         assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.results[0].network_error_phase == "range_dynamic"
+        assert manager.results[0].network_error_kind == "http_status"
+        assert manager.results[0].network_http_status == 503
         assert manager.exit_code == 1
 
 
