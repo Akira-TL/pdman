@@ -159,7 +159,7 @@ pdman debug ranges --latest --state failed --json
 pdman debug ranges --latest --search-root /path/to/tmp --jsonl
 ```
 
-`pdman debug ranges` 只读取 v0.5.5+ 的 dynamic debug metadata；不会恢复下载，不会修改 metadata 或下载文件，也不承诺跨大版本 metadata 兼容。v0.5.9 起，`--latest` 会从默认系统 tmp root、cache root 以及额外 `--search-root` 中递归查找最新的有效 `dynamic-ranges.json`；如果使用了显式 `--tmp` 或 target tmp，建议把对应目录传给 `--search-root`。
+`pdman debug ranges` 只读取 v0.5.5+ 的 dynamic debug metadata；不会恢复下载，不会修改 metadata 或下载文件，也不承诺跨大版本 metadata 兼容。v0.5.9 起，`--latest` 曾从默认系统 tmp root、cache root 以及额外 `--search-root` 中递归查找最新的有效 `dynamic-ranges.json`；v0.7.6 起，新运行 metadata 写入 cache metadata 目录，默认 `--latest` 只搜索 cache root，显式 `--search-root` 是严格搜索边界。
 
 v0.6.0 开始新增独立的 resume metadata v2 模型，用于后续严格恢复下载。它和 `dynamic-ranges.json` debug metadata 分离，字段包含 `schema_version=2`、`kind=resume`、`mode=static|dynamic`、URL、目标文件信息、file size、etag / last modified 以及 segments。当前版本只提供 metadata 读写、schema / layout 校验和 partial 文件大小检查；不会自动恢复下载，也不会修复 corrupted partial。static resume 接入和 dynamic recovery 会放到后续 v0.6.x。
 
@@ -185,7 +185,7 @@ v0.6.10 起，`docs/resume-diagnostics.md` 集中整理 resume diagnostics contr
 
 v0.6.11 起，`pdman debug resume --metadata <path>` 可只读 inspect `resume-metadata.json`，并支持 readable、`--json`、`--jsonl` 输出。该命令不恢复下载、不修改 tmp、不自动发现 metadata，也不读取 `dynamic-ranges.json`。
 
-v0.6.12 起，`pdman debug resume --latest` 会在 system tmp root、cache root 和额外 `--search-root` 中寻找最新有效的 `resume-metadata.json`。该发现逻辑仍然只读，不读取 `dynamic-ranges.json`，也不恢复、修复或迁移 tmp。
+v0.6.12 起，`pdman debug resume --latest` 曾在 system tmp root、cache root 和额外 `--search-root` 中寻找最新有效的 `resume-metadata.json`。该发现逻辑仍然只读，不读取 `dynamic-ranges.json`，也不恢复、修复或迁移 tmp。v0.7.6 起，默认 latest 改为只搜索 cache root，显式 `--search-root` 是严格搜索边界。
 
 v0.6.13 起，`pdman debug resume` 支持 `--state completed|partial|pending|failed`。readable 输出会显示 filter 和 filtered 统计，`--json` 输出包含 `filter`、`count`、`filtered_stats` 和匹配 segments，`--jsonl` 只输出匹配 segment。
 
@@ -210,6 +210,8 @@ v0.7.6 起，新运行不再把 `.pdm`、`resume-metadata.json` 或 `dynamic-ran
 v0.7.7 起，cache metadata 生命周期边界进一步固定：stale cache resume metadata 校验失败时只会被忽略，不会清理 tmp partial，也不会阻断旧 tmp `resume-metadata.json` / `.pdm` fallback；如果随后成功使用 legacy tmp metadata，会清除此前 stale cache rejection 诊断。`debug --latest --cache-dir <dir>` 只搜索指定 cache dir，latest 会跳过更新但无效的 metadata，选择最新 valid metadata。cache metadata 当前位于 `cache_root/metadata/<url-hash>/`，这是 cache layout，不是数据库 schema。
 
 v0.7.8 起，`pdman debug resume --latest` 和 `pdman debug ranges --latest` 的 readable 输出会显示 latest search diagnostics：搜索 root、valid candidate 数、skipped invalid metadata 数；未找到 latest metadata 时会显示实际搜索过的 roots。`--json` / `--jsonl` 输出 contract 不变。v0.7.9 固定这些 diagnostics helper 和 readable 格式的测试边界；自动化脚本仍应优先使用 `--json` / `--jsonl`，latest diagnostics 在 v0.7.x 中保持 readable-only。
+
+v0.7.10 起，`docs/releases/v0.7.md` 汇总 0.7.x 的 request probe、network taxonomy、range taxonomy、metadata hygiene、debug latest diagnostics、stable surfaces 和 non-goals。该版本是 0.7 release readiness 收束，不新增运行能力。
 
 ### 重试与超时
 

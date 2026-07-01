@@ -220,7 +220,7 @@ pdman debug ranges --latest --state failed --json
 pdman debug ranges --latest --search-root /path/to/tmp --jsonl
 ```
 
-默认输出 readable 诊断摘要；`--json` 输出包含 `filter`、`stats`、`state_counts`、`source_path` 和过滤后 `ranges` 的结构化 payload；`--jsonl` 每个 range 输出一行 JSON，方便脚本和 agent 管道消费。`--state` 支持 `pending`、`active`、`completed`、`failed`、`unknown`。v0.5.8 起，metadata 可包含向后兼容的 `selector` 诊断对象，记录 `requested_mode`、`selected_mode`、`reason` 和 `fallback_reason`；`pdman debug ranges --json` 会保留该字段，readable 输出也会显示 selector 摘要。metadata 写入改为原子替换，降低多 worker 同时更新 debug JSON 时产生损坏文件的风险。v0.5.9 起，`--latest` 会从默认系统 tmp root、cache root 以及额外 `--search-root` 中递归查找最新的有效 `dynamic-ranges.json`；如果使用了显式 `--tmp` 或 target tmp，建议把对应目录传给 `--search-root`。该命令只读取 v0.5.5+ 的 dynamic debug metadata，不恢复下载、不修改 metadata 或下载文件，也不保证跨大版本 metadata 兼容。
+默认输出 readable 诊断摘要；`--json` 输出包含 `filter`、`stats`、`state_counts`、`source_path` 和过滤后 `ranges` 的结构化 payload；`--jsonl` 每个 range 输出一行 JSON，方便脚本和 agent 管道消费。`--state` 支持 `pending`、`active`、`completed`、`failed`、`unknown`。v0.5.8 起，metadata 可包含向后兼容的 `selector` 诊断对象，记录 `requested_mode`、`selected_mode`、`reason` 和 `fallback_reason`；`pdman debug ranges --json` 会保留该字段，readable 输出也会显示 selector 摘要。metadata 写入改为原子替换，降低多 worker 同时更新 debug JSON 时产生损坏文件的风险。v0.5.9 起，`--latest` 曾从默认系统 tmp root、cache root 以及额外 `--search-root` 中递归查找最新的有效 `dynamic-ranges.json`；v0.7.6 起，新运行 metadata 写入 cache metadata 目录，默认 `--latest` 只搜索 cache root，显式 `--search-root` 是严格搜索边界。该命令只读取 v0.5.5+ 的 dynamic debug metadata，不恢复下载、不修改 metadata 或下载文件，也不保证跨大版本 metadata 兼容。
 
 v0.5.x 的 dynamic mode 仍是实验路径，不包含 dynamic resume、严格 resume metadata v2，也不会作为默认模式启用。
 
@@ -283,7 +283,7 @@ v0.6.10 新增 `docs/resume-diagnostics.md`，集中说明 resume diagnostics co
 
 v0.6.11 新增 `pdman debug resume --metadata <path>`，用于只读 inspect `resume-metadata.json`，并支持 readable、`--json`、`--jsonl` 输出。该命令不恢复下载、不修改 tmp、不自动发现 metadata，也不读取 `dynamic-ranges.json`。
 
-v0.6.12 为 `pdman debug resume` 增加 `--latest` 和 `--search-root`。`--latest` 会在 system tmp root、cache root 和额外 search root 中寻找最新有效的 `resume-metadata.json`，但仍保持只读，不读取 `dynamic-ranges.json`，不恢复、修复或迁移 tmp。
+v0.6.12 为 `pdman debug resume` 增加 `--latest` 和 `--search-root`。`--latest` 曾在 system tmp root、cache root 和额外 search root 中寻找最新有效的 `resume-metadata.json`，但仍保持只读，不读取 `dynamic-ranges.json`，不恢复、修复或迁移 tmp。v0.7.6 起，默认 latest 改为只搜索 cache root，显式 `--search-root` 是严格搜索边界。
 
 v0.6.13 为 `pdman debug resume` 增加 `--state completed|partial|pending|failed`。readable 输出显示 filter 与 filtered 统计，`--json` 输出包含 `filter`、`count`、`filtered_stats` 和匹配 segments，`--jsonl` 只输出匹配 segment。
 
@@ -475,6 +475,8 @@ Searched:
 `debug ranges --latest` 使用同样格式。该版本不改变 `--json` / `--jsonl` payload，不新增命令，不接入 history/database 查询层。
 
 v0.7.9 为 diagnostics helpers 和 legacy `find_latest_*` helpers 增加直接测试，固定 `roots`、`valid`、`skipped_invalid` 与 `selected_path` 行为。自动化脚本仍应优先使用 `--json` / `--jsonl`；latest diagnostics 在 v0.7.x 中保持 readable-only。
+
+v0.7.10 新增 `docs/releases/v0.7.md`，汇总 0.7.x request probe、network taxonomy、range taxonomy、metadata hygiene、debug latest diagnostics、stable surfaces 和 non-goals。该版本只做 release readiness、文档审计和 readable-only smoke tests，不新增运行能力。
 
 ---
 
