@@ -215,6 +215,47 @@ def test_cli_run_detail_shows_tasks(tmp_path, capsys):
     assert "ok.bin" in output
 
 
+def test_cli_run_json_outputs_run_and_tasks(tmp_path, capsys):
+    write_run(
+        tmp_path,
+        {
+            "run_id": "run-1",
+            "status": "finished",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:01:00Z",
+            "tmp_policy": "auto",
+            "task_counts": {"completed": 1, "skipped": 0, "failed": 0},
+            "exit_code": 0,
+        },
+    )
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "filename": "resumed.bin",
+                "status": "completed",
+                "downloaded_bytes": 2048,
+                "resume_rejection_code": "file_size_mismatch",
+                "resume_rejection_reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+            }
+        ],
+    )
+
+    exit_code = cli.main(["run", "run-1", "--json", "--cache-dir", str(tmp_path)])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["run"]["run_id"] == "run-1"
+    assert payload["task_count"] == 1
+    assert payload["tasks"][0]["filename"] == "resumed.bin"
+    assert payload["tasks"][0]["resume_rejection"] == {
+        "present": True,
+        "code": "file_size_mismatch",
+        "reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+    }
+
+
 def test_cli_run_missing_returns_one(tmp_path, capsys):
     exit_code = cli.main(["run", "missing", "--cache-dir", str(tmp_path)])
 
