@@ -291,6 +291,18 @@ v0.6.14 收束 `pdman debug resume` contract：增加 helper 级 summary/filter/
 
 v0.6.15 新增 `docs/releases/v0.6.md`，汇总 0.6.x resume diagnostics release notes、稳定输出面、non-goals 和 v0.7 过渡边界。该版本只做发布收束，不改变运行行为。
 
+### Network request strategy
+
+v0.7.0 开始，pdman 的 header inspection 使用两阶段探测：
+
+1. 默认使用 `HEAD`，成功状态只接受 `200` 或 `206`。
+2. 如果 `HEAD` 返回非 `200/206`，或 HEAD 请求出现连接类错误，自动 fallback 到 GET probe。
+3. GET probe 使用 `Range: bytes=0-0`，只用于读取响应头，不替代后续实际下载请求。
+4. 如果 GET probe 返回 `206`，pdman 会从 `Content-Range` 解析完整 total，并把内部 `Content-Length` 归一为完整文件大小；这样 dynamic selector、resume metadata 和 summary 都不会把 1-byte probe 误认为真实文件大小。
+5. 如果 GET probe 也返回非 `200/206`，任务继续按 header check failure 进入 failed，reason 仍为 `HTTP <status> during header check`。
+
+这个策略用于兼容禁用或错误实现 HEAD 的服务器，不新增用户控制参数，也不改变后续 static chunk、dynamic range、resume metadata、history 或 debug JSON/JSONL 的输出结构。
+
 ---
 
 ## 6. 回调命令
@@ -594,7 +606,7 @@ Manager.__init__
 Manager.add_urls() / Manager.load_input_file()
   ↓ 创建 Downloader
 Downloader.parse_config()
-  ↓ 解析单任务配置、文件名、目录、MD5、日志路径
+  ↓ 解析单任务配置、HEAD/GET probe、文件名、目录、MD5、日志路径
 Downloader._build_client_session()
   ↓ 构造 aiohttp.ClientSession
 Chunk.download()

@@ -193,6 +193,8 @@ v0.6.14 起，`pdman debug resume` 的 inspect contract 增加直接 helper 测�
 
 v0.6.15 起，`docs/releases/v0.6.md` 汇总 0.6.x release notes、稳定 diagnostics 输出面、明确 non-goals，并给出进入 v0.7 的边界。该版本只做发布收束，不改变代码行为。
 
+v0.7.0 起，header 探测策略改为默认先发 `HEAD`；如果 `HEAD` 返回非 `200/206`，或 HEAD 请求发生连接类错误，pdman 会自动 fallback 到轻量 `GET` probe。GET probe 会带 `Range: bytes=0-0`，用于读取 `Content-Disposition`、`Content-Length`、`Accept-Ranges` 等元数据；当服务端返回 `206` 时，会从 `Content-Range` 中还原完整文件大小，避免 dynamic selector 把 probe body 大小误判为真实文件大小。该行为不新增 CLI 参数，不改变后续实际下载的 static/dynamic Range 请求；如果 GET probe 仍失败，任务继续按 header check failure 记录为 failed。
+
 ### 重试与超时
 
 ```bash
