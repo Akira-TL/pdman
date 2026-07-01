@@ -213,6 +213,8 @@ v0.7.8 起，`pdman debug resume --latest` 和 `pdman debug ranges --latest` 的
 
 v0.7.10 起，`docs/releases/v0.7.md` 汇总 0.7.x 的 request probe、network taxonomy、range taxonomy、metadata hygiene、debug latest diagnostics、stable surfaces 和 non-goals。该版本是 0.7 release readiness 收束，不新增运行能力。
 
+v0.7.11 起，下载任务的 Rich progress 生命周期收束为“一个 Downloader 只创建一个下载进度 task”。static / dynamic 下载、task-level retry 和 merge 会复用同一条进度；任务进入 completed / skipped / failed 等终态时停止该进度，避免 retry 后出现多条同名下载进度、旧进度 elapsed 继续增加或重复显示 completed download 日志。该版本不改变 retry/backoff、分块调度、请求策略、queue schema、history/run JSON 或 metadata contract。
+
 ### 重试与超时
 
 ```bash

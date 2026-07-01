@@ -478,6 +478,8 @@ v0.7.9 为 diagnostics helpers 和 legacy `find_latest_*` helpers 增加直接�
 
 v0.7.10 新增 `docs/releases/v0.7.md`，汇总 0.7.x request probe、network taxonomy、range taxonomy、metadata hygiene、debug latest diagnostics、stable surfaces 和 non-goals。该版本只做 release readiness、文档审计和 readable-only smoke tests，不新增运行能力。
 
+v0.7.11 修复下载进度生命周期：同一个 Downloader 在 static / dynamic 下载、task-level retry 和 merge 期间只复用一条 Rich progress task，终态时停止该 task。这个 hotfix 用于避免 retry 后出现多条同名 `Downloading ...` 进度、旧进度 elapsed 继续增加以及重复 completed download 日志。该版本不改变 retry/backoff、分块调度、request probe、queue schema、history/run JSON 或 metadata contract。
+
 ---
 
 ## 6. 回调命令
