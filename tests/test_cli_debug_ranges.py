@@ -235,6 +235,37 @@ def test_cli_debug_ranges_latest_defaults_to_cache_only(tmp_path, monkeypatch, c
 
 
 
+def test_cli_debug_ranges_latest_cache_dir_is_strict(tmp_path, monkeypatch, capsys):
+    selected_cache = tmp_path / "selected-cache"
+    default_tmp = tmp_path / "default-tmp"
+    default_cache = tmp_path / "default-cache"
+    selected_cache.mkdir()
+    default_tmp.mkdir()
+    default_cache.mkdir()
+    selected = write_metadata(selected_cache)
+    tmp_candidate = write_metadata(default_tmp)
+    cache_candidate = write_metadata(default_cache)
+    os.utime(selected, (100, 100))
+    os.utime(tmp_candidate, (300, 300))
+    os.utime(cache_candidate, (400, 400))
+    monkeypatch.setattr(cli, "default_system_tmp_root", lambda: default_tmp)
+    monkeypatch.setattr(cli, "default_cache_root", lambda: default_cache)
+
+    exit_code = cli.main([
+        "debug",
+        "ranges",
+        "--latest",
+        "--cache-dir",
+        str(selected_cache),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["source_path"] == str(selected)
+
+
+
 def test_cli_debug_ranges_latest_search_root_is_strict(
     tmp_path, monkeypatch, capsys
 ):
