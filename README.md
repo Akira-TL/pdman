@@ -209,6 +209,8 @@ v0.7.6 起，新运行不再把 `.pdm`、`resume-metadata.json` 或 `dynamic-ran
 
 v0.7.7 起，cache metadata 生命周期边界进一步固定：stale cache resume metadata 校验失败时只会被忽略，不会清理 tmp partial，也不会阻断旧 tmp `resume-metadata.json` / `.pdm` fallback；如果随后成功使用 legacy tmp metadata，会清除此前 stale cache rejection 诊断。`debug --latest --cache-dir <dir>` 只搜索指定 cache dir，latest 会跳过更新但无效的 metadata，选择最新 valid metadata。cache metadata 当前位于 `cache_root/metadata/<url-hash>/`，这是 cache layout，不是数据库 schema。
 
+v0.7.8 起，`pdman debug resume --latest` 和 `pdman debug ranges --latest` 的 readable 输出会显示 latest search diagnostics：搜索 root、valid candidate 数、skipped invalid metadata 数；未找到 latest metadata 时会显示实际搜索过的 roots。`--json` / `--jsonl` 输出 contract 不变。
+
 ### 重试与超时
 
 ```bash

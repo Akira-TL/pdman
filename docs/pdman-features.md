@@ -455,6 +455,25 @@ cache_root/
 
 `<url-hash>` 当前由 URL hash 前缀生成。该目录结构是 cache layout，不是 database schema；后续 records/database 查询层应单独版本规划。
 
+v0.7.8 为 `debug --latest` readable UX 增加 latest search diagnostics。成功找到 metadata 时，readable 输出会先显示：
+
+```text
+Latest search:
+  root: /path/to/cache
+  valid: 1
+  skipped_invalid: 2
+```
+
+未找到 metadata 时，会显示实际搜索过的 roots：
+
+```text
+No resume metadata found.
+Searched:
+  /path/to/cache
+```
+
+`debug ranges --latest` 使用同样格式。该版本不改变 `--json` / `--jsonl` payload，不新增命令，不接入 history/database 查询层。
+
 ---
 
 ## 6. 回调命令
