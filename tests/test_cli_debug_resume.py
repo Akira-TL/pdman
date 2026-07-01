@@ -1,0 +1,118 @@
+import json
+
+import pdman.cli as cli
+
+
+def resume_payload(tmp_path):
+    first = tmp_path / "file.bin.0"
+    second = tmp_path / "file.bin.1024"
+    first.write_bytes(b"x" * 1024)
+    second.write_bytes(b"y" * 512)
+    return {
+        "schema_version": 2,
+        "kind": "resume",
+        "mode": "static",
+        "url": "https://example.com/file.bin",
+        "filename": "file.bin",
+        "target_path": str(tmp_path / "file.bin"),
+        "file_size": 2048,
+        "etag": "abc123",
+        "last_modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+        "created_at": None,
+        "updated_at": None,
+        "segments": [
+            {
+                "index": 0,
+                "start": 0,
+                "end": 1023,
+                "path": str(first),
+                "expected_size": 1024,
+                "existing_size": 0,
+                "state": "pending",
+            },
+            {
+                "index": 1,
+                "start": 1024,
+                "end": 2047,
+                "path": str(second),
+                "expected_size": 1024,
+                "existing_size": 0,
+                "state": "pending",
+            },
+        ],
+    }
+
+
+def write_resume_metadata(tmp_path, payload=None):
+    metadata_path = tmp_path / "resume-metadata.json"
+    metadata_path.write_text(json.dumps(payload or resume_payload(tmp_path)), encoding="utf-8")
+    return metadata_path
+
+
+def test_cli_debug_resume_readable(tmp_path, capsys):
+    metadata_path = write_resume_metadata(tmp_path)
+
+    exit_code = cli.main(["debug", "resume", "--metadata", str(metadata_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert f"Resume metadata: {metadata_path}" in output
+    assert "mode: static" in output
+    assert "file: file.bin size=2048" in output
+    assert "segments: total=2 completed=1 partial=1 pending=0 failed=0" in output
+    assert "#1 1024-2047 state=partial existing=512/1024" in output
+
+
+def test_cli_debug_resume_json(tmp_path, capsys):
+    metadata_path = write_resume_metadata(tmp_path)
+
+    exit_code = cli.main(["debug", "resume", "--metadata", str(metadata_path), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["source_path"] == str(metadata_path)
+    assert payload["mode"] == "static"
+    assert payload["filename"] == "file.bin"
+    assert payload["stats"] == {
+        "total_segments": 2,
+        "completed_count": 1,
+        "partial_count": 1,
+        "pending_count": 0,
+        "failed_count": 0,
+        "existing_bytes": 1536,
+        "expected_bytes": 2048,
+    }
+    assert payload["segments"][0]["state"] == "completed"
+    assert payload["segments"][1]["state"] == "partial"
+
+
+def test_cli_debug_resume_jsonl(tmp_path, capsys):
+    metadata_path = write_resume_metadata(tmp_path)
+
+    exit_code = cli.main(["debug", "resume", "--metadata", str(metadata_path), "--jsonl"])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert len(lines) == 2
+    assert [json.loads(line)["index"] for line in lines] == [0, 1]
+    assert [json.loads(line)["state"] for line in lines] == ["completed", "partial"]
+
+
+def test_cli_debug_resume_invalid_metadata_exits_non_zero(tmp_path, capsys):
+    payload = resume_payload(tmp_path)
+    payload["schema_version"] = 1
+    metadata_path = write_resume_metadata(tmp_path, payload)
+
+    exit_code = cli.main(["debug", "resume", "--metadata", str(metadata_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Resume rejected [schema_version_unsupported]" in output
+
+
+def test_cli_debug_resume_requires_metadata_path(capsys):
+    exit_code = cli.main(["debug", "resume"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "--metadata is required" in output
