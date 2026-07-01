@@ -367,6 +367,36 @@ def test_cli_debug_ranges_latest_skips_newer_invalid_cache_metadata(tmp_path, ca
 
 
 
+def test_cli_debug_ranges_latest_json_omits_readable_latest_diagnostics(tmp_path, capsys):
+    valid_dir = tmp_path / "valid"
+    invalid_dir = tmp_path / "invalid"
+    valid_dir.mkdir()
+    invalid_dir.mkdir()
+    valid = write_metadata(valid_dir)
+    invalid = invalid_dir / "dynamic-ranges.json"
+    invalid.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
+    os.utime(valid, (100, 100))
+    os.utime(invalid, (500, 500))
+
+    exit_code = cli.main([
+        "debug",
+        "ranges",
+        "--latest",
+        "--cache-dir",
+        str(tmp_path),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["source_path"] == str(valid)
+    assert "latest_search" not in payload
+    assert "search_roots" not in payload
+    assert "valid_count" not in payload
+    assert "skipped_invalid_count" not in payload
+
+
+
 def test_cli_debug_ranges_latest_readable_shows_search_roots_and_skips(tmp_path, capsys):
     valid_dir = tmp_path / "valid"
     invalid_dir = tmp_path / "invalid"
