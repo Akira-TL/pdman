@@ -283,6 +283,8 @@ v0.6.10 新增 `docs/resume-diagnostics.md`，集中说明 resume diagnostics co
 
 v0.6.11 新增 `pdman debug resume --metadata <path>`，用于只读 inspect `resume-metadata.json`，并支持 readable、`--json`、`--jsonl` 输出。该命令不恢复下载、不修改 tmp、不自动发现 metadata，也不读取 `dynamic-ranges.json`。
 
+v0.6.12 为 `pdman debug resume` 增加 `--latest` 和 `--search-root`。`--latest` 会在 system tmp root、cache root 和额外 search root 中寻找最新有效的 `resume-metadata.json`，但仍保持只读，不读取 `dynamic-ranges.json`，不恢复、修复或迁移 tmp。
+
 ---
 
 ## 6. 回调命令
