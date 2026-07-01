@@ -23,6 +23,7 @@ from .manager import Manager
 from .output import (
     history_records_payload,
     print_json,
+    run_detail_payload,
     print_jsonl,
     queue_add_payload,
     queue_clear_payload,
@@ -100,6 +101,7 @@ def handle_runs_command(argv=None) -> int:
 def handle_run_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman run")
     parser.add_argument("run_id")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     run = load_run(args.run_id, args.cache_dir)
@@ -111,6 +113,9 @@ def handle_run_command(argv=None) -> int:
         last=0,
         run_id=args.run_id,
     )
+    if args.json:
+        print_json(run_detail_payload(run, tasks))
+        return 0
     print(format_run_detail(run, tasks))
     return 0
 
