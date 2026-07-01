@@ -191,6 +191,8 @@ v0.6.13 起，`pdman debug resume` 支持 `--state completed|partial|pending|fai
 
 v0.6.14 起，`pdman debug resume` 的 inspect contract 增加直接 helper 测试和 CLI help/error 测试，固定 summary/filter/latest 字段边界；`--metadata` 与 `--latest` 明确互斥。该版本是 0.6 收束，不新增恢复行为。
 
+v0.6.15 起，`docs/releases/v0.6.md` 汇总 0.6.x release notes、稳定 diagnostics 输出面、明确 non-goals，并给出进入 v0.7 的边界。该版本只做发布收束，不改变代码行为。
+
 ### 重试与超时
 
 ```bash

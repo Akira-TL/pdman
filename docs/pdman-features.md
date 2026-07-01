@@ -289,6 +289,8 @@ v0.6.13 为 `pdman debug resume` 增加 `--state completed|partial|pending|faile
 
 v0.6.14 收束 `pdman debug resume` contract：增加 helper 级 summary/filter/latest 字段测试、CLI help/error 测试，并明确 `--metadata` 与 `--latest` 互斥。该版本不新增恢复行为。
 
+v0.6.15 新增 `docs/releases/v0.6.md`，汇总 0.6.x resume diagnostics release notes、稳定输出面、non-goals 和 v0.7 过渡边界。该版本只做发布收束，不改变运行行为。
+
 ---
 
 ## 6. 回调命令
