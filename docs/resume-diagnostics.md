@@ -110,3 +110,87 @@ If no resume rejection happened, the payload is:
 | `partial_too_large` | An on-disk partial file was larger than its expected segment size. |
 
 These codes are intended for diagnostics and script branching. They should not be interpreted as download failure reasons. A task can reject old resume metadata, restart, and still complete successfully.
+
+## Recommended reading paths
+
+Use the narrowest surface that answers the question.
+
+### For scripts checking recent task outcomes
+
+Use:
+
+```bash
+pdman history --json
+```
+
+This returns:
+
+- `count`: number of matching records.
+- `records`: history records enriched with `resume_rejection`.
+
+Use `--jsonl` when a stream of independent records is easier to process:
+
+```bash
+pdman history --jsonl
+```
+
+Each line is one enriched history record. Every record contains a `resume_rejection` payload.
+
+### For agents inspecting one run
+
+Use:
+
+```bash
+pdman run <run_id> --json
+```
+
+This returns:
+
+- `run`: the run summary loaded from the runtime run file.
+- `tasks`: history task records belonging to the run, each enriched with `resume_rejection`.
+- `task_count`: number of tasks in the response.
+
+This is the preferred agent entrypoint when a user asks why a specific run behaved a certain way.
+
+### For humans inspecting recent history
+
+Use:
+
+```bash
+pdman history
+pdman run <run_id>
+```
+
+Human output remains readable and includes resume rejection text when present. Scripts should prefer JSON/JSONL instead of parsing human output.
+
+### For dynamic allocator debugging
+
+Use:
+
+```bash
+pdman debug ranges --json
+pdman debug ranges --jsonl
+```
+
+This inspects `dynamic-ranges.json`, not resume recovery state. Use it when debugging dynamic range selection, split behavior, attempts, or fallback reasons. Do not use it to decide whether temporary files are safe to reuse.
+
+## Stable fields for scripts and agents
+
+The following fields are the intended stable diagnostics surface:
+
+- History records: `resume_rejection_code`, `resume_rejection_reason`.
+- Enriched JSON records: `resume_rejection.present`, `resume_rejection.code`, `resume_rejection.reason`.
+- Run detail JSON: `run`, `tasks`, `task_count`.
+- Resume rejection text format: `Resume rejected [<code>]: <message>`.
+
+The full `resume-metadata.json` file is an internal recovery contract. Scripts may inspect it for debugging, but should not rely on every field unless the field is documented here.
+
+## Non-goals in v0.6.x diagnostics
+
+The diagnostics surfaces above do not imply the following behaviors:
+
+- No dynamic recovery is enabled yet.
+- No corrupted partial file repair is performed.
+- No full resume metadata dump is exposed through history or run JSON.
+- No legacy `.pdm` migration is performed.
+- No resume rejection changes task exit code by itself.
