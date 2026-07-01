@@ -279,6 +279,8 @@ v0.6.8 为 `pdman history` 增加 `--json` / `--jsonl`，输出 records/count，
 
 v0.6.9 为 `pdman run <run_id>` 增加 `--json`，输出 run 摘要、tasks 和每个 task 的 `resume_rejection` payload。该版本只扩展 run detail JSON，不新增 `pdman run --jsonl`，不改变 human run detail、queue 或 debug ranges 输出。
 
+v0.6.10 新增 `docs/resume-diagnostics.md`，集中说明 resume diagnostics contract、rejection code、history/run JSON 读取方式，以及 `resume-metadata.json` 和 `dynamic-ranges.json` 的职责边界。该版本只做文档收束，不改变恢复、history、run 或 debug ranges 行为。
+
 ---
 
 ## 6. 回调命令

@@ -181,6 +181,8 @@ v0.6.8 起，`pdman history` 支持 `--json` / `--jsonl`，输出 history record
 
 v0.6.9 起，`pdman run <run_id>` 支持 `--json`，输出 run 摘要、tasks 和每个 task 的 `resume_rejection` payload。该版本只扩展 run detail JSON，不新增 `pdman run --jsonl`，不改变 human run detail、queue 或 debug ranges。
 
+v0.6.10 起，`docs/resume-diagnostics.md` 集中整理 resume diagnostics contract：包括 `resume-metadata.json`、`dynamic-ranges.json`、legacy `.pdm`、history JSON、run JSON 的职责边界，rejection code 含义，以及 agent/script 推荐读取路径。该版本只补文档，不改变运行行为。
+
 ### 重试与超时
 
 ```bash
