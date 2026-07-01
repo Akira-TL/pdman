@@ -53,9 +53,24 @@ def find_latest_resume_metadata(roots: list[str | Path]) -> Path | None:
     return max(candidates, key=lambda item: (item[0], str(item[1])))[1]
 
 
-def resume_metadata_summary(metadata_path: str | Path) -> dict[str, Any]:
+def _filter_segments(
+    segments: list[dict[str, Any]],
+    *,
+    state: str | None = None,
+) -> list[dict[str, Any]]:
+    if state is None:
+        return segments
+    return [segment for segment in segments if segment.get("state") == state]
+
+
+def resume_metadata_summary(
+    metadata_path: str | Path,
+    *,
+    state: str | None = None,
+) -> dict[str, Any]:
     payload = load_resume_metadata(metadata_path)
     segments = inspect_resume_segments(payload)
+    filtered_segments = _filter_segments(segments, state=state)
     return {
         "source_path": str(metadata_path),
         "schema_version": payload["schema_version"],
@@ -69,13 +84,18 @@ def resume_metadata_summary(metadata_path: str | Path) -> dict[str, Any]:
         "last_modified": payload.get("last_modified"),
         "created_at": payload.get("created_at"),
         "updated_at": payload.get("updated_at"),
+        "filter": {"state": state},
+        "count": len(filtered_segments),
         "stats": _segment_stats(segments),
-        "segments": segments,
+        "filtered_stats": _segment_stats(filtered_segments),
+        "segments": filtered_segments,
     }
 
 
 def format_resume_metadata_summary(summary: dict[str, Any]) -> str:
     stats = summary["stats"]
+    filtered_stats = summary["filtered_stats"]
+    state_filter = summary.get("filter", {}).get("state")
     lines = [
         f"Resume metadata: {summary['source_path']}",
         f"mode: {summary['mode']}",
@@ -88,8 +108,18 @@ def format_resume_metadata_summary(summary: dict[str, Any]) -> str:
         f"partial={stats['partial_count']} "
         f"pending={stats['pending_count']} "
         f"failed={stats['failed_count']}",
-        "Segments:",
     ]
+    if state_filter is not None:
+        lines.extend([
+            f"filter: state={state_filter}",
+            "filtered: "
+            f"total={filtered_stats['total_segments']} "
+            f"completed={filtered_stats['completed_count']} "
+            f"partial={filtered_stats['partial_count']} "
+            f"pending={filtered_stats['pending_count']} "
+            f"failed={filtered_stats['failed_count']}",
+        ])
+    lines.append("Segments:")
     for segment in summary["segments"]:
         lines.append(
             "  "

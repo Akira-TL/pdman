@@ -472,6 +472,11 @@ def handle_debug_resume_command(argv=None) -> int:
     parser.add_argument("--latest", action="store_true")
     parser.add_argument("--search-root", action="append", default=[])
     parser.add_argument("--cache-dir", default=None)
+    parser.add_argument(
+        "--state",
+        choices=("completed", "partial", "pending", "failed"),
+        default=None,
+    )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--json", action="store_true")
     output_group.add_argument("--jsonl", action="store_true")
@@ -489,7 +494,7 @@ def handle_debug_resume_command(argv=None) -> int:
         metadata_path = args.metadata
 
     try:
-        summary = resume_metadata_summary(metadata_path)
+        summary = resume_metadata_summary(metadata_path, state=args.state)
     except ResumeMetadataError as exc:
         print(f"Error: {format_resume_rejection(exc)}")
         return 1
