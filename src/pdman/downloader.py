@@ -680,6 +680,19 @@ class Downloader:
     def get_file_size(self) -> int:
         return self.file_size
 
+    def _task_metadata_dir(self) -> Path:
+        task_id = hashlib.sha256(self.url.encode("utf-8")).hexdigest()[:6]
+        return self.parent.runtime_paths.metadata_dir / task_id
+
+    def _resume_metadata_path(self) -> Path:
+        return self._task_metadata_dir() / RESUME_METADATA_FILENAME
+
+    def _legacy_resume_metadata_path(self) -> Path:
+        return Path(self.pdm_tmp) / RESUME_METADATA_FILENAME
+
+    def _dynamic_range_metadata_path(self) -> Path:
+        return self._task_metadata_dir() / DYNAMIC_RANGE_METADATA_FILENAME
+
     def _legacy_pdm_info_path(self) -> str:
         return os.path.join(self.pdm_tmp, ".pdm")
 
@@ -696,7 +709,6 @@ class Downloader:
     def _reset_tmp_with_pdm_info(self) -> None:
         shutil.rmtree(self.pdm_tmp, ignore_errors=True)
         os.makedirs(self.pdm_tmp, exist_ok=True)
-        self._write_legacy_pdm_info()
 
     def _static_chunk_specs(self) -> list[tuple[int, int | None, str]]:
         if self.file_size < 0:
@@ -778,7 +790,7 @@ class Downloader:
     async def _write_static_resume_metadata(self) -> None:
         if self.chunk_root is None or self.pdm_tmp is None or self.file_size < 0:
             return
-        metadata_path = Path(self.pdm_tmp) / RESUME_METADATA_FILENAME
+        metadata_path = self._resume_metadata_path()
         chunks = [chunk for chunk in self.chunk_root if chunk.end is not None]
         if not chunks:
             return
@@ -806,29 +818,40 @@ class Downloader:
         return root
 
     async def rebuild_task(self):
-        metadata_path = Path(self.pdm_tmp) / RESUME_METADATA_FILENAME
-        if metadata_path.exists() and self.file_size >= 0:
-            try:
-                payload = load_resume_metadata(metadata_path)
-                validate_resume_metadata(
-                    payload,
-                    expected_url=self.url,
-                    expected_target_path=self.target_path_if_named(),
-                    expected_file_size=self.file_size,
-                    expected_etag=self._header_etag(),
-                    expected_last_modified=self._header_last_modified(),
-                    inspect_partials=True,
-                )
-                return self._chunks_from_resume_segments(inspect_resume_segments(payload))
-            except ResumeMetadataError as e:
-                rejection_message = format_resume_rejection(e)
-                self.resume_rejection_code = e.reason_code.value
-                self.resume_rejection_reason = rejection_message
-                self._logger.warning(
-                    f"{rejection_message}; discarding stale temp files"
-                )
-                self._reset_tmp_with_pdm_info()
-                return None
+        cache_metadata_path = self._resume_metadata_path()
+        legacy_metadata_path = self._legacy_resume_metadata_path()
+        metadata_paths = [
+            path
+            for path in (cache_metadata_path, legacy_metadata_path)
+            if path.exists()
+        ]
+        if self.file_size >= 0:
+            for metadata_path in metadata_paths:
+                try:
+                    payload = load_resume_metadata(metadata_path)
+                    validate_resume_metadata(
+                        payload,
+                        expected_url=self.url,
+                        expected_target_path=self.target_path_if_named(),
+                        expected_file_size=self.file_size,
+                        expected_etag=self._header_etag(),
+                        expected_last_modified=self._header_last_modified(),
+                        inspect_partials=True,
+                    )
+                    return self._chunks_from_resume_segments(inspect_resume_segments(payload))
+                except ResumeMetadataError as e:
+                    rejection_message = format_resume_rejection(e)
+                    self.resume_rejection_code = e.reason_code.value
+                    self.resume_rejection_reason = rejection_message
+                    if metadata_path == legacy_metadata_path:
+                        self._logger.warning(
+                            f"{rejection_message}; discarding stale temp files"
+                        )
+                        self._reset_tmp_with_pdm_info()
+                        return None
+                    self._logger.warning(
+                        f"{rejection_message}; ignoring stale cache metadata"
+                    )
 
         # 校验 .pdm 元数据完整性：确保恢复的临时文件属于当前下载任务
         pdm_file = self._legacy_pdm_info_path()
@@ -1182,7 +1205,7 @@ class Downloader:
     async def _write_dynamic_metadata(self) -> None:
         if self.range_allocator is None or self.pdm_tmp is None:
             return
-        metadata_path = Path(self.pdm_tmp) / DYNAMIC_RANGE_METADATA_FILENAME
+        metadata_path = self._dynamic_range_metadata_path()
         try:
             async with self.metadata_lock:
                 await asyncio.to_thread(
@@ -1199,7 +1222,7 @@ class Downloader:
     async def _write_dynamic_resume_metadata(self) -> None:
         if self.range_allocator is None or self.pdm_tmp is None:
             return
-        metadata_path = Path(self.pdm_tmp) / RESUME_METADATA_FILENAME
+        metadata_path = self._resume_metadata_path()
         now = self._utc_now_iso()
         try:
             payload = dynamic_resume_metadata_payload(

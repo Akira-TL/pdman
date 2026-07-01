@@ -417,7 +417,7 @@ def _debug_range_search_roots(args) -> list[str]:
     if args.search_root:
         return list(args.search_root)
     cache_root = str(default_cache_root() if args.cache_dir is None else args.cache_dir)
-    return [str(default_system_tmp_root()), cache_root]
+    return [cache_root]
 
 
 def handle_debug_ranges_command(argv=None) -> int:

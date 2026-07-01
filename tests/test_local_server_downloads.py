@@ -463,6 +463,7 @@ def test_dynamic_segment_download_rejects_bad_content_range(tmp_path):
 def test_dynamic_failed_download_with_keep_tmp_retains_range_and_resume_metadata(tmp_path):
     with LocalDownloadServer() as server:
         tmp_root = tmp_path / "tmp"
+        cache_dir = tmp_path / "cache"
         manager = Manager(
             max_downloads=1,
             max_concurrent_downloads=2,
@@ -470,6 +471,7 @@ def test_dynamic_failed_download_with_keep_tmp_retains_range_and_resume_metadata
             segment_mode="dynamic",
             retry=0,
             tmp_dir=str(tmp_root),
+            cache_dir=str(cache_dir),
             keep_tmp=True,
             log_path=None,
         )
@@ -480,7 +482,9 @@ def test_dynamic_failed_download_with_keep_tmp_retains_range_and_resume_metadata
         )
         asyncio.run(manager.download())
 
-        metadata_files = list(tmp_root.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
+        assert not list(tmp_root.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
+        assert not list(tmp_root.glob(f"**/{RESUME_METADATA_FILENAME}"))
+        metadata_files = list(cache_dir.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
         assert len(metadata_files) == 1
         payload = json.loads(metadata_files[0].read_text())
         assert payload["schema_version"] == 1
@@ -492,7 +496,7 @@ def test_dynamic_failed_download_with_keep_tmp_retains_range_and_resume_metadata
             for item in payload["ranges"]
         )
 
-        resume_files = list(tmp_root.glob(f"**/{RESUME_METADATA_FILENAME}"))
+        resume_files = list(cache_dir.glob(f"**/{RESUME_METADATA_FILENAME}"))
         assert len(resume_files) == 1
         resume_payload = json.loads(resume_files[0].read_text())
         assert resume_payload["schema_version"] == 2
@@ -510,6 +514,7 @@ def test_dynamic_failed_download_with_keep_tmp_retains_range_and_resume_metadata
 def test_auto_segment_download_metadata_includes_selector_diagnostics(tmp_path):
     with LocalDownloadServer() as server:
         tmp_root = tmp_path / "tmp"
+        cache_dir = tmp_path / "cache"
         manager = Manager(
             max_downloads=1,
             max_concurrent_downloads=2,
@@ -517,6 +522,7 @@ def test_auto_segment_download_metadata_includes_selector_diagnostics(tmp_path):
             segment_mode="auto",
             retry=0,
             tmp_dir=str(tmp_root),
+            cache_dir=str(cache_dir),
             keep_tmp=True,
             log_path=None,
         )
@@ -527,7 +533,8 @@ def test_auto_segment_download_metadata_includes_selector_diagnostics(tmp_path):
         )
         asyncio.run(manager.download())
 
-        metadata_files = list(tmp_root.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
+        assert not list(tmp_root.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
+        metadata_files = list(cache_dir.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
         assert len(metadata_files) == 1
         payload = json.loads(metadata_files[0].read_text())
         assert payload["selector"] == {

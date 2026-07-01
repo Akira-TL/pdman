@@ -193,7 +193,7 @@ def test_manager_rejects_invalid_segment_mode():
 
 def test_downloader_writes_static_resume_metadata(tmp_path):
     async def run_case():
-        manager = Manager(log_path=None)
+        manager = Manager(cache_dir=str(tmp_path / "cache"), log_path=None)
         downloader = Downloader(
             manager,
             "https://example.com/file.bin",
@@ -219,9 +219,9 @@ def test_downloader_writes_static_resume_metadata(tmp_path):
 
         await downloader._write_static_resume_metadata()
 
-        payload = json.loads(
-            (tmp_path / "tmp" / RESUME_METADATA_FILENAME).read_text(encoding="utf-8")
-        )
+        metadata_path = downloader._resume_metadata_path()
+        assert not (tmp_path / "tmp" / RESUME_METADATA_FILENAME).exists()
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         assert payload["mode"] == "static"
         assert payload["url"] == "https://example.com/file.bin"
         assert payload["target_path"] == str(tmp_path / "file.bin")
