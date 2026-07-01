@@ -335,6 +335,110 @@ def test_rebuild_task_rejects_mismatched_resume_metadata(tmp_path):
     asyncio.run(run_case())
 
 
+def test_rebuild_task_ignores_stale_cache_metadata_without_clearing_tmp(tmp_path):
+    async def run_case():
+        manager = Manager(
+            continue_download=True,
+            cache_dir=str(tmp_path / "cache"),
+            log_path=None,
+        )
+        tmp_dir = tmp_path / "tmp"
+        tmp_dir.mkdir()
+        partial_path = tmp_dir / "file.bin.0"
+        partial_path.write_bytes(b"abcde")
+        chunks = [Chunk(None, 0, 4, str(partial_path))]
+        payload = static_resume_metadata_payload(
+            url="https://example.com/stale.bin",
+            filename="file.bin",
+            target_path=tmp_path / "file.bin",
+            file_size=5,
+            chunks=chunks,
+            etag=None,
+            last_modified=None,
+        )
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_dir),
+        )
+        downloader.file_size = 5
+        downloader.header_info = {}
+        warnings = []
+        downloader._logger = SimpleNamespace(warning=warnings.append)
+        downloader._resume_metadata_path().parent.mkdir(parents=True, exist_ok=True)
+        downloader._resume_metadata_path().write_text(json.dumps(payload), encoding="utf-8")
+
+        assert await downloader.rebuild_task() is None
+        assert partial_path.exists()
+        assert downloader.resume_rejection_code == "url_mismatch"
+        assert any("ignoring stale cache metadata" in item for item in warnings)
+        assert not any("discarding stale temp files" in item for item in warnings)
+
+    asyncio.run(run_case())
+
+
+def test_rebuild_task_uses_legacy_tmp_metadata_after_stale_cache_metadata(tmp_path):
+    async def run_case():
+        manager = Manager(
+            continue_download=True,
+            cache_dir=str(tmp_path / "cache"),
+            log_path=None,
+        )
+        tmp_dir = tmp_path / "tmp"
+        tmp_dir.mkdir()
+        partial_path = tmp_dir / "file.bin.0"
+        partial_path.write_bytes(b"abcde")
+        chunks = [Chunk(None, 0, 4, str(partial_path))]
+        stale_payload = static_resume_metadata_payload(
+            url="https://example.com/stale.bin",
+            filename="file.bin",
+            target_path=tmp_path / "file.bin",
+            file_size=5,
+            chunks=chunks,
+            etag=None,
+            last_modified=None,
+        )
+        legacy_payload = static_resume_metadata_payload(
+            url="https://example.com/file.bin",
+            filename="file.bin",
+            target_path=tmp_path / "file.bin",
+            file_size=5,
+            chunks=chunks,
+            etag=None,
+            last_modified=None,
+        )
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_dir),
+        )
+        downloader.file_size = 5
+        downloader.header_info = {}
+        warnings = []
+        downloader._logger = SimpleNamespace(warning=warnings.append)
+        downloader._resume_metadata_path().parent.mkdir(parents=True, exist_ok=True)
+        downloader._resume_metadata_path().write_text(json.dumps(stale_payload), encoding="utf-8")
+        (tmp_dir / RESUME_METADATA_FILENAME).write_text(
+            json.dumps(legacy_payload), encoding="utf-8"
+        )
+
+        root = await downloader.rebuild_task()
+
+        assert root is not None
+        assert root.start == 0
+        assert root.end == 4
+        assert root.size == 5
+        assert partial_path.exists()
+        assert any("ignoring stale cache metadata" in item for item in warnings)
+        assert not any("discarding stale temp files" in item for item in warnings)
+
+    asyncio.run(run_case())
+
+
 def test_rebuild_task_warns_when_using_legacy_pdm_fallback(tmp_path):
     async def run_case():
         manager = Manager(continue_download=True, log_path=None)
