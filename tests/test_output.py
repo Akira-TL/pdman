@@ -3,6 +3,7 @@ import json
 from pdman.output import (
     history_records_payload,
     print_jsonl,
+    run_detail_payload,
     resume_rejection_payload,
     queue_add_payload,
     queue_clear_payload,
@@ -78,6 +79,47 @@ def test_history_records_payload_includes_resume_diagnostics():
         "reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
     }
     assert payload["records"][1]["resume_rejection"] == {
+        "present": False,
+        "code": None,
+        "reason": None,
+    }
+
+
+def test_run_detail_payload_includes_resume_diagnostics():
+    run = {
+        "run_id": "run-1",
+        "status": "finished",
+        "task_counts": {"completed": 2, "skipped": 0, "failed": 0},
+        "exit_code": 0,
+    }
+    tasks = [
+        {
+            "run_id": "run-1",
+            "filename": "resumed.bin",
+            "status": "completed",
+            "downloaded_bytes": 1024,
+            "resume_rejection_code": "url_mismatch",
+            "resume_rejection_reason": "Resume rejected [url_mismatch]: url mismatch",
+        },
+        {
+            "run_id": "run-1",
+            "filename": "fresh.bin",
+            "status": "completed",
+            "downloaded_bytes": 2048,
+        },
+    ]
+
+    payload = run_detail_payload(run, tasks)
+
+    assert payload["run"] == run
+    assert payload["task_count"] == 2
+    assert payload["tasks"][0]["filename"] == "resumed.bin"
+    assert payload["tasks"][0]["resume_rejection"] == {
+        "present": True,
+        "code": "url_mismatch",
+        "reason": "Resume rejected [url_mismatch]: url mismatch",
+    }
+    assert payload["tasks"][1]["resume_rejection"] == {
         "present": False,
         "code": None,
         "reason": None,
