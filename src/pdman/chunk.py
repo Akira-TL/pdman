@@ -183,6 +183,8 @@ class Chunk:
                                             "speed is low restarting..."
                                         )
                                         continue
+                                else:
+                                    raise RuntimeError(f"range HTTP {response.status}")
                     except aiohttp.client_exceptions.ClientPayloadError:
                         await asyncio.sleep(
                             self.parent.parent.retry_wait + random.random() * 5
@@ -207,6 +209,8 @@ class Chunk:
                         )
                         # traceback.print_exc()
                         await asyncio.sleep(self.parent.parent.retry_wait)
+                        if self.size == 0:
+                            raise
                         break
                     if self._is_complete():
                         return self

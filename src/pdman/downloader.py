@@ -51,9 +51,13 @@ HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR = "head_connection_error"
 NETWORK_ERROR_PHASE_CONNECT = "connect"
 NETWORK_ERROR_PHASE_HEADER_HEAD = "header_head"
 NETWORK_ERROR_PHASE_HEADER_GET_PROBE = "header_get_probe"
+NETWORK_ERROR_PHASE_RANGE_STATIC = "range_static"
+NETWORK_ERROR_PHASE_RANGE_DYNAMIC = "range_dynamic"
 NETWORK_ERROR_KIND_CONNECTION_FAILED = "connection_failed"
 NETWORK_ERROR_KIND_CONNECTION_TIMEOUT = "connection_timeout"
 NETWORK_ERROR_KIND_HTTP_STATUS = "http_status"
+NETWORK_ERROR_KIND_RANGE_INCOMPLETE = "range_incomplete"
+NETWORK_ERROR_KIND_RANGE_RESPONSE = "range_response"
 
 
 def header_probe_http_fallback_reason(status: int) -> str:
@@ -103,6 +107,16 @@ class HeaderStatusSkip(Exception):
         return (
             f"Remote server returned HTTP {self.status}{reason} "
             f"while checking headers for {self.url}"
+        )
+
+
+class StaticRangeDownloadError(Exception):
+    def __init__(self, expected_bytes: int, actual_bytes: int):
+        self.expected_bytes = expected_bytes
+        self.actual_bytes = actual_bytes
+        super().__init__(
+            "static range download incomplete: "
+            f"actual {actual_bytes}/{expected_bytes} bytes"
         )
 
 
@@ -293,6 +307,11 @@ class Downloader:
             return os.path.getsize(target_path)
         return self.downloaded_bytes
 
+    def _clear_network_error(self) -> None:
+        self.network_error_phase = None
+        self.network_error_kind = None
+        self.network_http_status = None
+
     def record_result(
         self,
         status: TaskStatus,
@@ -300,6 +319,8 @@ class Downloader:
         reason_code: TaskReason | None = None,
         error: str | None = None,
     ) -> TaskResult:
+        if status != TaskStatus.FAILED:
+            self._clear_network_error()
         self.set_status(status, reason, reason_code, error)
         self.result = TaskResult(
             url=self.url,
@@ -1197,6 +1218,40 @@ class Downloader:
         except Exception as e:
             self._logger.warning(f"Failed to write dynamic resume metadata: {e}")
 
+    def _set_range_network_error(self, phase: str, error: Exception) -> None:
+        self.network_error_phase = phase
+        if isinstance(error, RangeResponseError):
+            if error.status is not None and error.status not in (200, 206):
+                self.network_error_kind = NETWORK_ERROR_KIND_HTTP_STATUS
+                self.network_http_status = error.status
+            else:
+                self.network_error_kind = NETWORK_ERROR_KIND_RANGE_RESPONSE
+                self.network_http_status = error.status
+            return
+        if isinstance(error, StaticRangeDownloadError):
+            self.network_error_kind = NETWORK_ERROR_KIND_RANGE_INCOMPLETE
+            self.network_http_status = None
+            return
+        if "incomplete" in str(error):
+            self.network_error_kind = NETWORK_ERROR_KIND_RANGE_INCOMPLETE
+            self.network_http_status = None
+            return
+        match = re.search(r"HTTP (\d{3})", str(error))
+        if match:
+            self.network_error_kind = NETWORK_ERROR_KIND_HTTP_STATUS
+            self.network_http_status = int(match.group(1))
+            return
+        self.network_error_kind = NETWORK_ERROR_KIND_RANGE_RESPONSE
+        self.network_http_status = None
+
+    def _static_downloaded_size_mismatch(self) -> tuple[int, int] | None:
+        if self.file_size <= 0 or self.chunk_root is None:
+            return None
+        actual_bytes = sum(self.chunk_root)
+        if actual_bytes == self.file_size:
+            return None
+        return self.file_size, actual_bytes
+
     async def _start_dynamic_download(self) -> None:
         allocator = self._build_range_allocator()
         self.range_allocator = allocator
@@ -1240,7 +1295,8 @@ class Downloader:
                     f"range {failed.start}-{failed.end} failed: {failed.last_error}"
                 )
             await self.progress
-        except Exception:
+        except Exception as e:
+            self._set_range_network_error(NETWORK_ERROR_PHASE_RANGE_DYNAMIC, e)
             if not self.progress.done():
                 self.progress.cancel()
                 with suppress(asyncio.CancelledError):
@@ -1403,6 +1459,13 @@ class Downloader:
                 )
             except Exception as e:
                 self._logger.debug(traceback.format_exc())
+                if self.status == TaskStatus.DOWNLOADING and self.network_error_phase is None:
+                    phase = (
+                        NETWORK_ERROR_PHASE_RANGE_DYNAMIC
+                        if self.segment_selected_mode == "dynamic"
+                        else NETWORK_ERROR_PHASE_RANGE_STATIC
+                    )
+                    self._set_range_network_error(phase, e)
                 if _iter > 0:
                     reason_code = (
                         TaskReason.MERGE_FAILED
@@ -1523,6 +1586,19 @@ class Downloader:
 
         self.progress = asyncio.create_task(progress_run())
 
+        async def collect_done_tasks(done):
+            for d in done:
+                tasks.remove(d)
+                exc = d.exception()
+                if exc is not None:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    if tasks:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                    raise exc
+                d.result()
+
         # 在锁保护下收集所有初始 chunk 引用，避免并发修改链表导致迭代器异常
         async with self.lock:
             chunks_to_start = [chunk for chunk in self.chunk_root]
@@ -1539,8 +1615,7 @@ class Downloader:
                 done, pending = await asyncio.wait(
                     tasks, return_when=asyncio.FIRST_COMPLETED
                 )
-                for d in done:
-                    tasks.remove(d)
+                await collect_done_tasks(done)
                 tasks.append(asyncio.create_task(chunk.download()))
         while True:
             if tasks.__len__() < self.parent.max_concurrent_downloads:
@@ -1558,10 +1633,22 @@ class Downloader:
             done, pending = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_COMPLETED
             )
-            for d in done:
-                tasks.remove(d)
+            await collect_done_tasks(done)
             new_chunk = await self.create_chunk()
             if new_chunk is None:
                 break
             tasks.append(asyncio.create_task(new_chunk.download()))
-        await asyncio.gather(*tasks, self.progress)
+        try:
+            await asyncio.gather(*tasks)
+            size_mismatch = self._static_downloaded_size_mismatch()
+            if size_mismatch is not None:
+                expected_bytes, actual_bytes = size_mismatch
+                raise StaticRangeDownloadError(expected_bytes, actual_bytes)
+            await self.progress
+        except Exception as e:
+            self._set_range_network_error(NETWORK_ERROR_PHASE_RANGE_STATIC, e)
+            if not self.progress.done():
+                self.progress.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self.progress
+            raise
