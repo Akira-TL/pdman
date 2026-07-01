@@ -47,6 +47,7 @@ from .range_metadata_inspect import (
 )
 from .resume_metadata import ResumeMetadataError, format_resume_rejection
 from .resume_metadata_inspect import (
+    find_latest_resume_metadata,
     format_resume_metadata_summary,
     resume_metadata_summary,
 )
@@ -468,17 +469,27 @@ def handle_debug_ranges_command(argv=None) -> int:
 def handle_debug_resume_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman debug resume")
     parser.add_argument("--metadata", default=None)
+    parser.add_argument("--latest", action="store_true")
+    parser.add_argument("--search-root", action="append", default=[])
+    parser.add_argument("--cache-dir", default=None)
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--json", action="store_true")
     output_group.add_argument("--jsonl", action="store_true")
     args = parser.parse_args(argv)
 
-    if args.metadata is None:
-        print("--metadata is required")
-        return 1
+    if args.latest:
+        metadata_path = find_latest_resume_metadata(_debug_range_search_roots(args))
+        if metadata_path is None:
+            print("No resume metadata found.")
+            return 1
+    else:
+        if args.metadata is None:
+            print("--metadata is required, or use --latest")
+            return 1
+        metadata_path = args.metadata
 
     try:
-        summary = resume_metadata_summary(args.metadata)
+        summary = resume_metadata_summary(metadata_path)
     except ResumeMetadataError as exc:
         print(f"Error: {format_resume_rejection(exc)}")
         return 1

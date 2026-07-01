@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .resume_metadata import inspect_resume_segments, load_resume_metadata
+from .resume_metadata import (
+    RESUME_METADATA_FILENAME,
+    ResumeMetadataError,
+    inspect_resume_segments,
+    load_resume_metadata,
+)
 
 
 def _segment_stats(segments: list[dict[str, Any]]) -> dict[str, int]:
@@ -24,6 +29,28 @@ def _segment_stats(segments: list[dict[str, Any]]) -> dict[str, int]:
         stats["existing_bytes"] += int(segment.get("existing_size") or 0)
         stats["expected_bytes"] += int(segment.get("expected_size") or 0)
     return stats
+
+
+def find_latest_resume_metadata(roots: list[str | Path]) -> Path | None:
+    candidates: list[tuple[float, Path]] = []
+    for root in roots:
+        root_path = Path(root).expanduser()
+        if not root_path.exists():
+            continue
+        if root_path.is_file():
+            paths = [root_path] if root_path.name == RESUME_METADATA_FILENAME else []
+        else:
+            paths = root_path.rglob(RESUME_METADATA_FILENAME)
+        for path in paths:
+            try:
+                load_resume_metadata(path)
+                mtime = path.stat().st_mtime
+            except (OSError, ResumeMetadataError):
+                continue
+            candidates.append((mtime, path))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item[0], str(item[1])))[1]
 
 
 def resume_metadata_summary(metadata_path: str | Path) -> dict[str, Any]:
@@ -75,6 +102,7 @@ def format_resume_metadata_summary(summary: dict[str, Any]) -> str:
 
 
 __all__ = [
+    "find_latest_resume_metadata",
     "format_resume_metadata_summary",
     "resume_metadata_summary",
 ]
