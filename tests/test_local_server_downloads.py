@@ -51,11 +51,11 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                 return
             self._send_payload(PAYLOAD, "head-405-get-ok.bin", send_body)
             return
-        if parsed.path == "/head-503-get-ok.bin":
+        if parsed.path == "/head-501-get-ok.bin":
             if not send_body:
-                self._send_text(503, b"HEAD unavailable")
+                self._send_text(501, b"HEAD not implemented")
                 return
-            self._send_payload(PAYLOAD, "head-503-get-ok.bin", send_body)
+            self._send_payload(PAYLOAD, "head-501-get-ok.bin", send_body)
             return
         if parsed.path == "/uneven.bin":
             self._send_payload(UNEVEN_PAYLOAD, "uneven.bin", send_body)
@@ -1194,7 +1194,7 @@ def test_head_405_falls_back_to_get_probe_and_preserves_filename(tmp_path):
         assert manager.exit_code == 0
 
 
-def test_head_failure_get_fallback_preserves_file_size_for_dynamic(tmp_path):
+def test_head_501_get_fallback_preserves_file_size_for_dynamic(tmp_path):
     with LocalDownloadServer() as server:
         manager = Manager(
             max_downloads=1,
@@ -1205,7 +1205,7 @@ def test_head_failure_get_fallback_preserves_file_size_for_dynamic(tmp_path):
             log_path=None,
         )
         manager.append(
-            server.url("/head-503-get-ok.bin"),
+            server.url("/head-501-get-ok.bin"),
             file_name="fallback-dynamic.bin",
             dir_path=str(tmp_path),
         )

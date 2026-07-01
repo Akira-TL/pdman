@@ -59,6 +59,7 @@ class ConnectionTimeoutSkip(Exception):
 
 class HeaderStatusSkip(Exception):
     RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+    GET_FALLBACK_STATUS_CODES = {403, 404, 405, 501}
 
     def __init__(self, url: str, status: int, reason: str | None = None):
         self.url = url
@@ -576,6 +577,12 @@ class Downloader:
                 ) as response:
                     if response.status in (200, 206):
                         return self._headers_from_response(response)
+                    if response.status not in HeaderStatusSkip.GET_FALLBACK_STATUS_CODES:
+                        raise HeaderStatusSkip(
+                            self.url,
+                            response.status,
+                            getattr(response, "reason", None),
+                        )
                     self._logger.warning(
                         "HEAD header probe returned "
                         f"HTTP {response.status}; falling back to GET probe"
