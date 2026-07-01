@@ -419,6 +419,19 @@ v0.7.5 还修正 static chunk task 的异常收割：static chunk task 完全未
 
 边界：task-level `network_error_*` 只记录最终失败阶段和类别，不复制每个 range 的完整错误列表。dynamic per-range 细节继续由 `dynamic-ranges.json` 和 dynamic resume metadata 承担；queue schema 仍不扩展，queue `last_error` 文案不改变。
 
+### Metadata storage hygiene
+
+v0.7.6 起，新运行不再把 metadata 写入 task tmp 目录：
+
+- 不再创建新的 `.pdm`。
+- `resume-metadata.json` 写入 cache metadata 目录。
+- `dynamic-ranges.json` 写入 cache metadata 目录。
+- task tmp 目录只保留 chunk / partial 文件。
+
+`pdman debug resume --latest` 和 `pdman debug ranges --latest` 默认只搜索 cache root；如果传入 `--cache-dir`，则搜索该 cache root。显式传入 `--search-root` 时，`--search-root` 是严格边界，只搜索用户指定目录，不再混入默认 cache 或 system tmp。
+
+兼容边界：旧 tmp 中已经存在的 `resume-metadata.json` 仍可被 `--continue` 读取；旧 `.pdm` 仍作为最后 fallback 读取。但新运行不会再写这些 tmp metadata。cache metadata 如果校验失败，只会被忽略，不会直接清理 tmp partial；只有 legacy tmp v2 metadata 校验失败时才清理 tmp。
+
 ---
 
 ## 6. 回调命令

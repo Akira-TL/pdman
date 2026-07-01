@@ -205,6 +205,8 @@ v0.7.4 起，网络失败会写入结构化诊断字段：`network_error_phase`�
 
 v0.7.5 起，range 下载阶段也进入 network taxonomy：static chunk 失败记录为 `network_error_phase=range_static`，dynamic range 失败记录为 `network_error_phase=range_dynamic`。range HTTP status 继续使用 `network_error_kind=http_status`，range body 不完整使用 `range_incomplete`，Content-Range / range response 校验失败使用 `range_response`。该版本不改变 queue schema，也不把每个 range 的详细错误复制进 task result；dynamic per-range 细节仍以 `dynamic-ranges.json` 和 resume metadata 为准。
 
+v0.7.6 起，新运行不再把 `.pdm`、`resume-metadata.json` 或 `dynamic-ranges.json` 写入 task tmp 目录；tmp 只保留 chunk / partial 文件。resume 与 dynamic range metadata 改写入 cache metadata 目录，`pdman debug resume --latest` 和 `pdman debug ranges --latest` 默认只搜索 cache root。显式传入 `--search-root` 时，该 root 是严格搜索边界，不再混入默认 tmp/cache root。旧 tmp 中已有的 `resume-metadata.json` 和 `.pdm` 仍可作为兼容 fallback 读取。
+
 ### 重试与超时
 
 ```bash

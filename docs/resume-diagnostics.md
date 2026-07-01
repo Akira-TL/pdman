@@ -19,8 +19,8 @@ Current boundaries:
 
 | Surface | Producer | Consumer | Purpose | Contract level |
 | --- | --- | --- | --- | --- |
-| `resume-metadata.json` | Downloader tmp directory | Resume validation | Recovery identity and segment contract | Strict recovery contract |
-| `dynamic-ranges.json` | Dynamic allocator debug path | `pdman debug ranges` | Runtime range allocator inspection | Debug/diagnostic contract |
+| `resume-metadata.json` | Cache metadata directory for new runs; legacy tmp paths still readable | Resume validation | Recovery identity and segment contract | Strict recovery contract |
+| `dynamic-ranges.json` | Cache metadata directory for new runs; legacy tmp paths still readable by explicit path/search-root | `pdman debug ranges` | Runtime range allocator inspection | Debug/diagnostic contract |
 | legacy `.pdm` | Older resume path | Legacy fallback | Compatibility only when v2 metadata is missing | Legacy compatibility |
 | runtime `history.jsonl` | Runtime history writer | `pdman history`, scripts, agents | Finished task record with resume rejection fields | Stable history record |
 | `pdman history --json` | CLI history query | Scripts and agents | Agent-readable history records | CLI JSON contract |
@@ -175,7 +175,7 @@ pdman debug resume --metadata /path/to/resume-metadata.json --state partial --js
 pdman debug resume --latest --search-root /path/to/tmp --json
 ```
 
-This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the system tmp root, cache root, and any extra `--search-root` values for the newest valid `resume-metadata.json`. With `--state`, readable output shows filter and filtered stats, JSON output includes `filter`, `count`, and `filtered_stats`, and JSONL emits only matching segments. `--metadata` and `--latest` are mutually exclusive source selectors.
+This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the cache root for the newest valid `resume-metadata.json`. If `--search-root` is provided, that directory becomes the strict search boundary and default roots are not added. With `--state`, readable output shows filter and filtered stats, JSON output includes `filter`, `count`, and `filtered_stats`, and JSONL emits only matching segments. `--metadata` and `--latest` are mutually exclusive source selectors.
 
 ### For dynamic allocator debugging
 
@@ -186,7 +186,7 @@ pdman debug ranges --json
 pdman debug ranges --jsonl
 ```
 
-This inspects `dynamic-ranges.json`, not resume recovery state. Use it when debugging dynamic range selection, split behavior, attempts, or fallback reasons. Do not use it to decide whether temporary files are safe to reuse.
+This inspects `dynamic-ranges.json`, not resume recovery state. New runs write it to the cache metadata directory rather than task tmp. Use it when debugging dynamic range selection, split behavior, attempts, or fallback reasons. Do not use it to decide whether temporary files are safe to reuse.
 
 ## Stable fields for scripts and agents
 
