@@ -468,8 +468,9 @@ def handle_debug_ranges_command(argv=None) -> int:
 
 def handle_debug_resume_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman debug resume")
-    parser.add_argument("--metadata", default=None)
-    parser.add_argument("--latest", action="store_true")
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--metadata", default=None)
+    source_group.add_argument("--latest", action="store_true")
     parser.add_argument("--search-root", action="append", default=[])
     parser.add_argument("--cache-dir", default=None)
     parser.add_argument(

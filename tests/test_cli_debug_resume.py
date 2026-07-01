@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 import pdman.cli as cli
 
 
@@ -235,6 +237,29 @@ def test_cli_debug_resume_latest_missing_metadata_exits_non_zero(tmp_path, capsy
     output = capsys.readouterr().out
     assert exit_code == 1
     assert "No resume metadata found" in output
+
+
+def test_cli_debug_resume_help_documents_contract(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["debug", "resume", "--help"])
+
+    output = capsys.readouterr().out
+    assert exc_info.value.code == 0
+    assert "--metadata" in output
+    assert "--latest" in output
+    assert "--search-root" in output
+    assert "--state {completed,partial,pending,failed}" in output
+    assert "--json" in output
+    assert "--jsonl" in output
+
+
+def test_cli_debug_resume_rejects_metadata_and_latest_together(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["debug", "resume", "--metadata", "resume-metadata.json", "--latest"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "not allowed with argument" in captured.err
 
 
 def test_cli_debug_resume_requires_metadata_path(capsys):
