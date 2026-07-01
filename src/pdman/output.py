@@ -42,6 +42,18 @@ def history_records_payload(
     return {key: serialized, "count": len(serialized)}
 
 
+def run_detail_payload(
+    run: dict[str, Any],
+    tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    task_payload = history_records_payload(tasks, key="tasks")
+    return {
+        "run": dict(run),
+        "tasks": task_payload["tasks"],
+        "task_count": task_payload["count"],
+    }
+
+
 def queue_record_to_dict(record: QueueRecord) -> dict[str, Any]:
     return record.to_dict()
 
