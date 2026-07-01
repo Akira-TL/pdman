@@ -414,11 +414,10 @@ def handle_queue_command(argv=None) -> int:
 
 
 def _debug_range_search_roots(args) -> list[str]:
-    roots = [str(default_system_tmp_root())]
+    if args.search_root:
+        return list(args.search_root)
     cache_root = str(default_cache_root() if args.cache_dir is None else args.cache_dir)
-    roots.append(cache_root)
-    roots.extend(args.search_root or [])
-    return roots
+    return [str(default_system_tmp_root()), cache_root]
 
 
 def handle_debug_ranges_command(argv=None) -> int:

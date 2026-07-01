@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 import pdman.cli as cli
 
 
@@ -206,6 +208,39 @@ def test_cli_debug_ranges_latest_jsonl_honors_state_filter(tmp_path, capsys):
     assert exit_code == 0
     assert len(lines) == 1
     assert json.loads(lines[0])["state"] == "failed"
+
+
+def test_cli_debug_ranges_latest_search_root_is_strict(
+    tmp_path, monkeypatch, capsys
+):
+    search_root = tmp_path / "search-root"
+    default_tmp = tmp_path / "default-tmp"
+    default_cache = tmp_path / "default-cache"
+    search_root.mkdir()
+    default_tmp.mkdir()
+    default_cache.mkdir()
+    selected = write_metadata(search_root)
+    tmp_candidate = write_metadata(default_tmp)
+    cache_candidate = write_metadata(default_cache)
+    os.utime(selected, (100, 100))
+    os.utime(tmp_candidate, (300, 300))
+    os.utime(cache_candidate, (400, 400))
+    monkeypatch.setattr(cli, "default_system_tmp_root", lambda: default_tmp)
+    monkeypatch.setattr(cli, "default_cache_root", lambda: default_cache)
+
+    exit_code = cli.main([
+        "debug",
+        "ranges",
+        "--latest",
+        "--search-root",
+        str(search_root),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["source_path"] == str(selected)
+
 
 
 def test_cli_debug_ranges_latest_missing_metadata_exits_non_zero(tmp_path, capsys):
