@@ -201,6 +201,8 @@ v0.7.2 起，HEAD→GET fallback 会进入任务诊断：`TaskResult`、runtime 
 
 v0.7.3 起，probe fallback reason code 被固定为公开诊断 contract：`head_http_403`、`head_http_404`、`head_http_405`、`head_http_501` 和 `head_connection_error`。HTTP reason 只会在这些允许 fallback 的 HEAD 状态中出现；`408/425/429/5xx` 仍然不会 fallback，会保留 retry / failed 语义。
 
+v0.7.4 起，网络失败会写入结构化诊断字段：`network_error_phase`、`network_error_kind`、`network_http_status`，history/run JSON 还会提供归一化 `network_error` 对象。当前稳定阶段包括 `connect`、`header_head`、`header_get_probe`；稳定类型包括 `connection_timeout`、`connection_failed`、`http_status`。该诊断用于区分“HEAD 不 fallback 的 HTTP 失败”和“GET probe fallback 后的 HTTP 失败”，不改变 retry、queue 或下载行为。
+
 ### 重试与超时
 
 ```bash

@@ -345,6 +345,47 @@ v0.7.3 固定 `header_probe_fallback_reason` 的 reason code contract：
 
 未发生 fallback 时，`fallback_used=false`，`fallback_reason=null`；`method` 可能为 `HEAD` 或 `null`，取决于记录来源是否包含 probe method。v0.7.3 不把这些字段写入 queue record，也不新增用户控制开关。
 
+### Network failure taxonomy
+
+v0.7.4 将网络失败诊断拆成三个字段，并写入 `TaskResult`、runtime history 和 run task record：
+
+- `network_error_phase`：失败发生阶段。
+- `network_error_kind`：失败类型。
+- `network_http_status`：HTTP 失败时的状态码；非 HTTP 失败为 `null`。
+
+history/run JSON payload 会额外提供归一化对象：
+
+```json
+{
+  "network_error": {
+    "present": true,
+    "phase": "header_get_probe",
+    "kind": "http_status",
+    "http_status": 500
+  }
+}
+```
+
+当前稳定 phase：
+
+| phase | 含义 |
+| --- | --- |
+| `connect` | 连接建立、等待连接或连接类失败 |
+| `header_head` | HEAD header inspection 阶段失败 |
+| `header_get_probe` | HEAD fallback 之后的 GET probe 阶段失败 |
+
+当前稳定 kind：
+
+| kind | 含义 |
+| --- | --- |
+| `connection_timeout` | 连接或等待连接超时 |
+| `connection_failed` | socket / TCP / aiohttp connection 类失败 |
+| `http_status` | HTTP status 不可接受 |
+
+`header_probe_*` 与 `network_error_*` 的职责不同：probe 字段描述是否发生 HEAD→GET fallback；network 字段描述任务失败发生在哪个网络阶段。一个任务可以有 `header_probe_fallback_reason=head_http_405`，同时因为 GET probe 返回 500 而记录 `network_error_phase=header_get_probe`、`network_http_status=500`。
+
+v0.7.4 不改变 retry 策略，不改变 queue schema，也不把这些字段复制进 queue record。queue 仍用于调度和重试候选；完整网络诊断以 history/run 为准。
+
 ---
 
 ## 6. 回调命令
