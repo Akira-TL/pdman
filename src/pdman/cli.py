@@ -45,6 +45,11 @@ from .range_metadata_inspect import (
     load_range_metadata,
     range_metadata_summary,
 )
+from .resume_metadata import ResumeMetadataError, format_resume_rejection
+from .resume_metadata_inspect import (
+    format_resume_metadata_summary,
+    resume_metadata_summary,
+)
 from .runtime import default_cache_root, default_system_tmp_root
 from .task_input import TaskInput, load_task_input
 
@@ -460,14 +465,44 @@ def handle_debug_ranges_command(argv=None) -> int:
     return 0
 
 
+def handle_debug_resume_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman debug resume")
+    parser.add_argument("--metadata", default=None)
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.metadata is None:
+        print("--metadata is required")
+        return 1
+
+    try:
+        summary = resume_metadata_summary(args.metadata)
+    except ResumeMetadataError as exc:
+        print(f"Error: {format_resume_rejection(exc)}")
+        return 1
+
+    if args.json:
+        print_json(summary)
+        return 0
+    if args.jsonl:
+        print_jsonl(summary["segments"])
+        return 0
+    print(format_resume_metadata_summary(summary))
+    return 0
+
+
 def handle_debug_command(argv=None) -> int:
     argv = list(argv or [])
     if not argv:
-        print("Debug command required: ranges")
+        print("Debug command required: ranges or resume")
         return 1
     command, rest = argv[0], argv[1:]
     if command == "ranges":
         return handle_debug_ranges_command(rest)
+    if command == "resume":
+        return handle_debug_resume_command(rest)
     print(f"Unknown debug command: {command}")
     return 1
 
