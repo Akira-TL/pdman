@@ -1,0 +1,59 @@
+# Resume diagnostics contract
+
+This document defines the current resume diagnostics contract for pdman v0.6.x. It is written for users, scripts, and agents that need to understand why pdman reused or rejected temporary download state.
+
+## Scope
+
+Resume diagnostics explain the state around `--continue` and temporary files. They are diagnostics, not recovery behavior.
+
+Current boundaries:
+
+- Static downloads can write and read `resume-metadata.json`.
+- Dynamic downloads can emit `resume-metadata.json`, but dynamic recovery is not enabled.
+- `dynamic-ranges.json` is debug metadata, not the recovery contract.
+- Legacy `.pdm` fallback is a compatibility path only.
+- History and run JSON outputs expose compact diagnostics for scripts and agents.
+- pdman does not automatically repair corrupted partial files.
+
+## Files and outputs
+
+| Surface | Producer | Consumer | Purpose | Contract level |
+| --- | --- | --- | --- | --- |
+| `resume-metadata.json` | Downloader tmp directory | Resume validation | Recovery identity and segment contract | Strict recovery contract |
+| `dynamic-ranges.json` | Dynamic allocator debug path | `pdman debug ranges` | Runtime range allocator inspection | Debug/diagnostic contract |
+| legacy `.pdm` | Older resume path | Legacy fallback | Compatibility only when v2 metadata is missing | Legacy compatibility |
+| runtime `history.jsonl` | Runtime history writer | `pdman history`, scripts, agents | Finished task record with resume rejection fields | Stable history record |
+| `pdman history --json` | CLI history query | Scripts and agents | Agent-readable history records | CLI JSON contract |
+| `pdman history --jsonl` | CLI history query | Stream processors and agents | One enriched history record per line | CLI JSONL contract |
+| `pdman run <run_id> --json` | CLI run query | Scripts and agents | One run plus enriched tasks | CLI JSON contract |
+
+## `resume-metadata.json`
+
+`resume-metadata.json` is the strict v2 recovery contract. It is separate from dynamic debug metadata and contains only the information needed to decide whether temporary files are safe to reuse.
+
+Important fields include:
+
+- `schema_version`: currently `2`.
+- `kind`: currently `resume`.
+- `mode`: `static` or `dynamic`.
+- `url`: original URL identity.
+- `filename` and `target_path`: target identity.
+- `file_size`: expected remote file size.
+- `etag` and `last_modified`: optional remote validators.
+- `segments`: expected partial file layout and state.
+
+When `--continue` validates v2 metadata, pdman checks URL, target path, file size, etag, last-modified, segment layout, and partial file sizes before reusing temporary state. If validation rejects the metadata, pdman records a resume rejection and does not fall back to legacy `.pdm`.
+
+Changing static chunk options such as `-x` or `-k` does not by itself invalidate existing v2 static resume metadata. pdman follows the segment layout stored in metadata rather than recomputing a new layout from the current options.
+
+## `dynamic-ranges.json`
+
+`dynamic-ranges.json` is debug metadata for dynamic range allocation. It is meant for inspection through `pdman debug ranges` and related readable, JSON, or JSONL output.
+
+It may include allocator diagnostics such as range attempts, selector decisions, fallback reasons, failed ranges, split layout, and last errors. It is not used as the recovery contract and must not be treated as a substitute for `resume-metadata.json`.
+
+## Legacy `.pdm` fallback
+
+The legacy `.pdm` file is retained for compatibility with older temporary directories. It is allowed only when `resume-metadata.json` is missing. When this path is used, pdman emits a legacy fallback warning.
+
+If `resume-metadata.json` exists but is rejected, pdman clears stale temporary files and restarts rather than falling back to `.pdm`. This prevents old metadata from bypassing v2 identity checks.
