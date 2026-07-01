@@ -474,6 +474,8 @@ Searched:
 
 `debug ranges --latest` 使用同样格式。该版本不改变 `--json` / `--jsonl` payload，不新增命令，不接入 history/database 查询层。
 
+v0.7.9 为 diagnostics helpers 和 legacy `find_latest_*` helpers 增加直接测试，固定 `roots`、`valid`、`skipped_invalid` 与 `selected_path` 行为。自动化脚本仍应优先使用 `--json` / `--jsonl`；latest diagnostics 在 v0.7.x 中保持 readable-only。
+
 ---
 
 ## 6. 回调命令
