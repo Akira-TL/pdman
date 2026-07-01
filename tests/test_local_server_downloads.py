@@ -45,6 +45,18 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
         if parsed.path == "/normal.bin":
             self._send_payload(PAYLOAD, "normal.bin", send_body)
             return
+        if parsed.path == "/head-405-get-ok.bin":
+            if not send_body:
+                self._send_text(405, b"HEAD not allowed")
+                return
+            self._send_payload(PAYLOAD, "head-405-get-ok.bin", send_body)
+            return
+        if parsed.path == "/head-503-get-ok.bin":
+            if not send_body:
+                self._send_text(503, b"HEAD unavailable")
+                return
+            self._send_payload(PAYLOAD, "head-503-get-ok.bin", send_body)
+            return
         if parsed.path == "/uneven.bin":
             self._send_payload(UNEVEN_PAYLOAD, "uneven.bin", send_body)
             return
@@ -1160,6 +1172,49 @@ def test_header_http_status_is_failed_without_raising(tmp_path):
         assert manager.results[0].status == TaskStatus.FAILED
         assert manager.results[0].reason_code == TaskReason.HTTP_STATUS
         assert manager.exit_code == 1
+
+
+def test_head_405_falls_back_to_get_probe_and_preserves_filename(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/head-405-get-ok.bin"),
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "head-405-get-ok.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].filename == "head-405-get-ok.bin"
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
+def test_head_failure_get_fallback_preserves_file_size_for_dynamic(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=4,
+            min_split_size=1024,
+            segment_mode="dynamic",
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/head-503-get-ok.bin"),
+            file_name="fallback-dynamic.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "fallback-dynamic.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.results[0].total_bytes == len(PAYLOAD)
+        assert manager.exit_code == 0
 
 
 def test_unknown_content_length_downloads_successfully(tmp_path):
