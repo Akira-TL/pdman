@@ -2,6 +2,7 @@ import json
 
 from pdman.output import (
     history_records_payload,
+    header_probe_payload,
     print_jsonl,
     run_detail_payload,
     resume_rejection_payload,
@@ -51,6 +52,37 @@ def test_resume_rejection_payload_from_history_record_and_empty_record():
     }
 
 
+def test_header_probe_payload_from_task_result_and_history_record():
+    result = TaskResult(
+        url="https://example.com/file.bin",
+        filename="file.bin",
+        status=TaskStatus.COMPLETED,
+        header_probe_method="GET",
+        header_probe_fallback_reason="head_http_405",
+    )
+    record = {
+        "header_probe_method": "GET",
+        "header_probe_fallback_reason": "head_connection_error",
+    }
+
+    assert header_probe_payload(result) == {
+        "method": "GET",
+        "fallback_used": True,
+        "fallback_reason": "head_http_405",
+    }
+    assert header_probe_payload(record) == {
+        "method": "GET",
+        "fallback_used": True,
+        "fallback_reason": "head_connection_error",
+    }
+    assert header_probe_payload({}) == {
+        "method": None,
+        "fallback_used": False,
+        "fallback_reason": None,
+    }
+
+
+
 def test_history_records_payload_includes_resume_diagnostics():
     records = [
         {
@@ -60,6 +92,8 @@ def test_history_records_payload_includes_resume_diagnostics():
             "downloaded_bytes": 1024,
             "resume_rejection_code": "file_size_mismatch",
             "resume_rejection_reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
+            "header_probe_method": "GET",
+            "header_probe_fallback_reason": "head_http_405",
         },
         {
             "run_id": "run-1",
@@ -78,10 +112,20 @@ def test_history_records_payload_includes_resume_diagnostics():
         "code": "file_size_mismatch",
         "reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
     }
+    assert payload["records"][0]["header_probe"] == {
+        "method": "GET",
+        "fallback_used": True,
+        "fallback_reason": "head_http_405",
+    }
     assert payload["records"][1]["resume_rejection"] == {
         "present": False,
         "code": None,
         "reason": None,
+    }
+    assert payload["records"][1]["header_probe"] == {
+        "method": None,
+        "fallback_used": False,
+        "fallback_reason": None,
     }
 
 

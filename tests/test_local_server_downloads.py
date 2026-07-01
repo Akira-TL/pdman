@@ -1229,7 +1229,36 @@ def test_head_405_falls_back_to_get_probe_and_preserves_filename(tmp_path):
         assert (tmp_path / "head-405-get-ok.bin").read_bytes() == PAYLOAD
         assert manager.results[0].filename == "head-405-get-ok.bin"
         assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.results[0].header_probe_method == "GET"
+        assert manager.results[0].header_probe_fallback_reason == "head_http_405"
+        assert "Probe:" in manager.summarize_results()
+        assert "head_http_405" in manager.summarize_results()
         assert manager.exit_code == 0
+
+
+def test_head_get_fallback_is_written_to_runtime_history(tmp_path):
+    with LocalDownloadServer() as server:
+        cache_dir = tmp_path / "cache"
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            cache_dir=str(cache_dir),
+            retry=1,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/head-405-get-ok.bin"),
+            file_name="history-fallback.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        history_record = json.loads(
+            manager.runtime_paths.history_path.read_text().splitlines()[0]
+        )
+        assert history_record["header_probe_method"] == "GET"
+        assert history_record["header_probe_fallback_reason"] == "head_http_405"
+
 
 
 def test_head_501_get_fallback_preserves_file_size_for_dynamic(tmp_path):
