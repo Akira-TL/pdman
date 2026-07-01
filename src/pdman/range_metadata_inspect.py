@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -63,10 +64,20 @@ def _ranges(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in payload["ranges"] if isinstance(item, dict)]
 
 
-def find_latest_range_metadata(
+@dataclass(frozen=True)
+class LatestRangeMetadataSearch:
+    roots: list[str]
+    selected_path: Path | None
+    valid_count: int
+    skipped_invalid_count: int
+
+
+def find_latest_range_metadata_diagnostics(
     roots: list[str | Path],
-) -> Path | None:
+) -> LatestRangeMetadataSearch:
     candidates: list[tuple[float, Path]] = []
+    skipped_invalid_count = 0
+    resolved_roots = [str(Path(root).expanduser()) for root in roots]
     for root in roots:
         root_path = Path(root).expanduser()
         if not root_path.exists():
@@ -80,11 +91,24 @@ def find_latest_range_metadata(
                 load_range_metadata(path)
                 mtime = path.stat().st_mtime
             except (OSError, RangeMetadataError):
+                skipped_invalid_count += 1
                 continue
             candidates.append((mtime, path))
-    if not candidates:
-        return None
-    return max(candidates, key=lambda item: (item[0], str(item[1])))[1]
+    selected_path = None
+    if candidates:
+        selected_path = max(candidates, key=lambda item: (item[0], str(item[1])))[1]
+    return LatestRangeMetadataSearch(
+        roots=resolved_roots,
+        selected_path=selected_path,
+        valid_count=len(candidates),
+        skipped_invalid_count=skipped_invalid_count,
+    )
+
+
+def find_latest_range_metadata(
+    roots: list[str | Path],
+) -> Path | None:
+    return find_latest_range_metadata_diagnostics(roots).selected_path
 
 
 def filter_ranges(
@@ -223,3 +247,15 @@ def format_range_metadata(
         else:
             lines.append("  No matching ranges.")
     return "\n".join(lines)
+
+
+__all__ = [
+    "LatestRangeMetadataSearch",
+    "RangeMetadataError",
+    "filter_ranges",
+    "find_latest_range_metadata",
+    "find_latest_range_metadata_diagnostics",
+    "format_range_metadata",
+    "load_range_metadata",
+    "range_metadata_summary",
+]

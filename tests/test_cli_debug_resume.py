@@ -340,6 +340,33 @@ def test_cli_debug_resume_latest_skips_newer_invalid_cache_metadata(tmp_path, ca
 
 
 
+def test_cli_debug_resume_latest_readable_shows_search_roots_and_skips(tmp_path, capsys):
+    valid_dir = tmp_path / "valid"
+    invalid_dir = tmp_path / "invalid"
+    valid_dir.mkdir()
+    invalid_dir.mkdir()
+    valid = write_resume_metadata(valid_dir)
+    invalid = invalid_dir / "resume-metadata.json"
+    invalid.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
+    os.utime(valid, (100, 100))
+    os.utime(invalid, (500, 500))
+
+    exit_code = cli.main([
+        "debug",
+        "resume",
+        "--latest",
+        "--cache-dir",
+        str(tmp_path),
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Latest search:" in output
+    assert f"  root: {tmp_path}" in output
+    assert "  skipped_invalid: 1" in output
+    assert f"Resume metadata: {valid}" in output
+
+
 def test_cli_debug_resume_latest_missing_metadata_exits_non_zero(tmp_path, capsys):
     exit_code = cli.main([
         "debug",
@@ -352,6 +379,8 @@ def test_cli_debug_resume_latest_missing_metadata_exits_non_zero(tmp_path, capsy
     output = capsys.readouterr().out
     assert exit_code == 1
     assert "No resume metadata found" in output
+    assert "Searched:" in output
+    assert f"  {tmp_path}" in output
 
 
 def test_cli_debug_resume_help_documents_contract(capsys):

@@ -39,7 +39,7 @@ from .queue import recover_running, remove_queue_records, repair_queue
 from .queue import retry_failed_candidates, start_queue_records, validate_queue
 from .range_metadata_inspect import (
     RangeMetadataError,
-    find_latest_range_metadata,
+    find_latest_range_metadata_diagnostics,
     filter_ranges,
     format_range_metadata,
     load_range_metadata,
@@ -47,7 +47,7 @@ from .range_metadata_inspect import (
 )
 from .resume_metadata import ResumeMetadataError, format_resume_rejection
 from .resume_metadata_inspect import (
-    find_latest_resume_metadata,
+    find_latest_resume_metadata_diagnostics,
     format_resume_metadata_summary,
     resume_metadata_summary,
 )
@@ -420,6 +420,19 @@ def _debug_range_search_roots(args) -> list[str]:
     return [cache_root]
 
 
+def _format_latest_search(search) -> str:
+    lines = ["Latest search:"]
+    for root in search.roots:
+        lines.append(f"  root: {root}")
+    lines.append(f"  valid: {search.valid_count}")
+    lines.append(f"  skipped_invalid: {search.skipped_invalid_count}")
+    return "\n".join(lines)
+
+
+def _format_searched_roots(roots: list[str]) -> str:
+    return "Searched:\n" + "\n".join(f"  {root}" for root in roots)
+
+
 def handle_debug_ranges_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman debug ranges")
     parser.add_argument("metadata_file", nargs="?", default=None)
@@ -436,10 +449,15 @@ def handle_debug_ranges_command(argv=None) -> int:
     output_group.add_argument("--jsonl", action="store_true")
     args = parser.parse_args(argv)
 
+    latest_search = None
     if args.latest:
-        metadata_path = find_latest_range_metadata(_debug_range_search_roots(args))
+        latest_search = find_latest_range_metadata_diagnostics(
+            _debug_range_search_roots(args)
+        )
+        metadata_path = latest_search.selected_path
         if metadata_path is None:
             print("No dynamic range metadata found.")
+            print(_format_searched_roots(latest_search.roots))
             return 1
     else:
         if args.metadata_file is None:
@@ -461,6 +479,8 @@ def handle_debug_ranges_command(argv=None) -> int:
     if args.jsonl:
         print_jsonl(filter_ranges(payload, state=args.state))
         return 0
+    if latest_search is not None:
+        print(_format_latest_search(latest_search))
     print(format_range_metadata(payload, state=args.state, source_path=metadata_path))
     return 0
 
@@ -482,10 +502,15 @@ def handle_debug_resume_command(argv=None) -> int:
     output_group.add_argument("--jsonl", action="store_true")
     args = parser.parse_args(argv)
 
+    latest_search = None
     if args.latest:
-        metadata_path = find_latest_resume_metadata(_debug_range_search_roots(args))
+        latest_search = find_latest_resume_metadata_diagnostics(
+            _debug_range_search_roots(args)
+        )
+        metadata_path = latest_search.selected_path
         if metadata_path is None:
             print("No resume metadata found.")
+            print(_format_searched_roots(latest_search.roots))
             return 1
     else:
         if args.metadata is None:
@@ -505,6 +530,8 @@ def handle_debug_resume_command(argv=None) -> int:
     if args.jsonl:
         print_jsonl(summary["segments"])
         return 0
+    if latest_search is not None:
+        print(_format_latest_search(latest_search))
     print(format_resume_metadata_summary(summary))
     return 0
 

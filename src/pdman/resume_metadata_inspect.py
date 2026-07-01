@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,8 +32,20 @@ def _segment_stats(segments: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
-def find_latest_resume_metadata(roots: list[str | Path]) -> Path | None:
+@dataclass(frozen=True)
+class LatestResumeMetadataSearch:
+    roots: list[str]
+    selected_path: Path | None
+    valid_count: int
+    skipped_invalid_count: int
+
+
+def find_latest_resume_metadata_diagnostics(
+    roots: list[str | Path],
+) -> LatestResumeMetadataSearch:
     candidates: list[tuple[float, Path]] = []
+    skipped_invalid_count = 0
+    resolved_roots = [str(Path(root).expanduser()) for root in roots]
     for root in roots:
         root_path = Path(root).expanduser()
         if not root_path.exists():
@@ -46,11 +59,22 @@ def find_latest_resume_metadata(roots: list[str | Path]) -> Path | None:
                 load_resume_metadata(path)
                 mtime = path.stat().st_mtime
             except (OSError, ResumeMetadataError):
+                skipped_invalid_count += 1
                 continue
             candidates.append((mtime, path))
-    if not candidates:
-        return None
-    return max(candidates, key=lambda item: (item[0], str(item[1])))[1]
+    selected_path = None
+    if candidates:
+        selected_path = max(candidates, key=lambda item: (item[0], str(item[1])))[1]
+    return LatestResumeMetadataSearch(
+        roots=resolved_roots,
+        selected_path=selected_path,
+        valid_count=len(candidates),
+        skipped_invalid_count=skipped_invalid_count,
+    )
+
+
+def find_latest_resume_metadata(roots: list[str | Path]) -> Path | None:
+    return find_latest_resume_metadata_diagnostics(roots).selected_path
 
 
 def _filter_segments(
@@ -132,7 +156,9 @@ def format_resume_metadata_summary(summary: dict[str, Any]) -> str:
 
 
 __all__ = [
+    "LatestResumeMetadataSearch",
     "find_latest_resume_metadata",
+    "find_latest_resume_metadata_diagnostics",
     "format_resume_metadata_summary",
     "resume_metadata_summary",
 ]
