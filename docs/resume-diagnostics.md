@@ -175,7 +175,7 @@ pdman debug resume --metadata /path/to/resume-metadata.json --state partial --js
 pdman debug resume --latest --search-root /path/to/tmp --json
 ```
 
-This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the system tmp root, cache root, and any extra `--search-root` values for the newest valid `resume-metadata.json`. With `--state`, readable output shows filter and filtered stats, JSON output includes `filter`, `count`, and `filtered_stats`, and JSONL emits only matching segments.
+This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the system tmp root, cache root, and any extra `--search-root` values for the newest valid `resume-metadata.json`. With `--state`, readable output shows filter and filtered stats, JSON output includes `filter`, `count`, and `filtered_stats`, and JSONL emits only matching segments. `--metadata` and `--latest` are mutually exclusive source selectors.
 
 ### For dynamic allocator debugging
 
@@ -195,6 +195,8 @@ The following fields are the intended stable diagnostics surface:
 - History records: `resume_rejection_code`, `resume_rejection_reason`.
 - Enriched JSON records: `resume_rejection.present`, `resume_rejection.code`, `resume_rejection.reason`.
 - Run detail JSON: `run`, `tasks`, `task_count`.
+- Resume inspect JSON: `source_path`, `schema_version`, `kind`, `mode`, `url`, `filename`, `target_path`, `file_size`, `etag`, `last_modified`, `created_at`, `updated_at`, `filter`, `count`, `stats`, `filtered_stats`, `segments`.
+- Resume inspect segment JSON: `index`, `start`, `end`, `path`, `expected_size`, `existing_size`, `state`.
 - Resume rejection text format: `Resume rejected [<code>]: <message>`.
 
 The full `resume-metadata.json` file is an internal recovery contract. Scripts may inspect it for debugging, but should not rely on every field unless the field is documented here.

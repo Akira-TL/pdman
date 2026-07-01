@@ -189,6 +189,8 @@ v0.6.12 起，`pdman debug resume --latest` 会在 system tmp root、cache root 
 
 v0.6.13 起，`pdman debug resume` 支持 `--state completed|partial|pending|failed`。readable 输出会显示 filter 和 filtered 统计，`--json` 输出包含 `filter`、`count`、`filtered_stats` 和匹配 segments，`--jsonl` 只输出匹配 segment。
 
+v0.6.14 起，`pdman debug resume` 的 inspect contract 增加直接 helper 测试和 CLI help/error 测试，固定 summary/filter/latest 字段边界；`--metadata` 与 `--latest` 明确互斥。该版本是 0.6 收束，不新增恢复行为。
+
 ### 重试与超时
 
 ```bash

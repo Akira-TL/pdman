@@ -287,6 +287,8 @@ v0.6.12 为 `pdman debug resume` 增加 `--latest` 和 `--search-root`。`--late
 
 v0.6.13 为 `pdman debug resume` 增加 `--state completed|partial|pending|failed`。readable 输出显示 filter 与 filtered 统计，`--json` 输出包含 `filter`、`count`、`filtered_stats` 和匹配 segments，`--jsonl` 只输出匹配 segment。
 
+v0.6.14 收束 `pdman debug resume` contract：增加 helper 级 summary/filter/latest 字段测试、CLI help/error 测试，并明确 `--metadata` 与 `--latest` 互斥。该版本不新增恢复行为。
+
 ---
 
 ## 6. 回调命令
