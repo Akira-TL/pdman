@@ -30,6 +30,20 @@ def resume_rejection_payload(source: TaskResult | dict[str, Any]) -> dict[str, A
     }
 
 
+def header_probe_payload(source: TaskResult | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(source, TaskResult):
+        method = source.header_probe_method
+        fallback_reason = source.header_probe_fallback_reason
+    else:
+        method = source.get("header_probe_method")
+        fallback_reason = source.get("header_probe_fallback_reason")
+    return {
+        "method": method,
+        "fallback_used": bool(fallback_reason),
+        "fallback_reason": fallback_reason,
+    }
+
+
 def history_records_payload(
     records: list[dict[str, Any]],
     key: str = "records",
@@ -38,6 +52,7 @@ def history_records_payload(
     for record in records:
         item = dict(record)
         item["resume_rejection"] = resume_rejection_payload(record)
+        item["header_probe"] = header_probe_payload(record)
         serialized.append(item)
     return {key: serialized, "count": len(serialized)}
 

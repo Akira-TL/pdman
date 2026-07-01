@@ -726,6 +726,14 @@ class Manager:
             for result in resume_rejected:
                 name = result.filename or result.url
                 lines.append(f"  {name} - {result.resume_rejection_reason}")
+        probe_fallbacks = [r for r in self.results if r.header_probe_fallback_reason]
+        if probe_fallbacks:
+            lines.append("Probe:")
+            for result in probe_fallbacks:
+                name = result.filename or result.url
+                method = result.header_probe_method or "-"
+                reason = result.header_probe_fallback_reason
+                lines.append(f"  {name} - {method} fallback={reason}")
         if skipped:
             lines.append("Skipped:")
             for result in skipped:

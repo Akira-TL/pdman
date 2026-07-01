@@ -136,6 +136,14 @@ def _record_resume_reason(record: dict[str, Any]) -> str:
     return str(record.get("resume_rejection_reason") or "")
 
 
+def _record_probe_reason(record: dict[str, Any]) -> str:
+    method = record.get("header_probe_method")
+    reason = record.get("header_probe_fallback_reason")
+    if not reason:
+        return ""
+    return f"Probe: {method or '-'} fallback={reason}"
+
+
 def format_history(records: list[dict[str, Any]]) -> str:
     if not records:
         return "No history found."
@@ -147,11 +155,14 @@ def format_history(records: list[dict[str, Any]]) -> str:
         size = format_bytes(record.get("downloaded_bytes"))
         reason = _record_reason(record)
         resume_reason = _record_resume_reason(record)
+        probe_reason = _record_probe_reason(record)
         suffix = ""
         if reason and status != "completed":
             suffix = f" - {reason}"
         if resume_reason:
             suffix = f"{suffix} - {resume_reason}" if suffix else f" - {resume_reason}"
+        if probe_reason:
+            suffix = f"{suffix} - {probe_reason}" if suffix else f" - {probe_reason}"
         lines.append(f"  {finished_at} {status:<9} {name} {size}{suffix}")
     return "\n".join(lines)
 
@@ -204,11 +215,14 @@ def format_run_detail(run: dict[str, Any], tasks: list[dict[str, Any]]) -> str:
         size = format_bytes(record.get("downloaded_bytes"))
         reason = _record_reason(record)
         resume_reason = _record_resume_reason(record)
+        probe_reason = _record_probe_reason(record)
         suffix = ""
         if reason and status != "completed":
             suffix = f" - {reason}"
         if resume_reason:
             suffix = f"{suffix} - {resume_reason}" if suffix else f" - {resume_reason}"
+        if probe_reason:
+            suffix = f"{suffix} - {probe_reason}" if suffix else f" - {probe_reason}"
         lines.append(f"  {status:<9} {name} {size}{suffix}")
     return "\n".join(lines)
 

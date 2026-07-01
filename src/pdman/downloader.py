@@ -282,6 +282,8 @@ class Downloader:
             reason_code=reason_code or self.status_reason_code,
             error=error or self.status_error,
             downloaded_bytes=self._result_bytes(),
+            header_probe_method=self.header_probe_method,
+            header_probe_fallback_reason=self.header_probe_fallback_reason,
             resume_rejection_code=self.resume_rejection_code,
             resume_rejection_reason=self.resume_rejection_reason,
             total_bytes=self.file_size if self.file_size > 0 else None,

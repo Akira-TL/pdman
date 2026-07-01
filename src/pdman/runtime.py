@@ -294,6 +294,8 @@ def task_result_to_record(
         "error": result.error,
         "downloaded_bytes": result.downloaded_bytes,
         "total_bytes": result.total_bytes,
+        "header_probe_method": result.header_probe_method,
+        "header_probe_fallback_reason": result.header_probe_fallback_reason,
         "resume_rejection_code": result.resume_rejection_code,
         "resume_rejection_reason": result.resume_rejection_reason,
         "started_at": started_at,
