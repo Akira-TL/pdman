@@ -57,3 +57,56 @@ It may include allocator diagnostics such as range attempts, selector decisions,
 The legacy `.pdm` file is retained for compatibility with older temporary directories. It is allowed only when `resume-metadata.json` is missing. When this path is used, pdman emits a legacy fallback warning.
 
 If `resume-metadata.json` exists but is rejected, pdman clears stale temporary files and restarts rather than falling back to `.pdm`. This prevents old metadata from bypassing v2 identity checks.
+
+## Resume rejection format
+
+When resume metadata is rejected, pdman formats the reason as:
+
+```text
+Resume rejected [<code>]: <message>
+```
+
+The same compact information can also appear in `TaskResult`, runtime history, `pdman history --json`, `pdman history --jsonl`, and `pdman run <run_id> --json`.
+
+JSON diagnostic payloads use this shape:
+
+```json
+{
+  "present": true,
+  "code": "file_size_mismatch",
+  "reason": "Resume rejected [file_size_mismatch]: file_size mismatch"
+}
+```
+
+If no resume rejection happened, the payload is:
+
+```json
+{
+  "present": false,
+  "code": null,
+  "reason": null
+}
+```
+
+## Resume rejection codes
+
+| Code | Meaning |
+| --- | --- |
+| `unknown` | A fallback code when no more specific rejection code was assigned. |
+| `metadata_missing` | The v2 metadata file could not be read. |
+| `metadata_json_invalid` | The metadata file was not valid JSON. |
+| `metadata_object_invalid` | The parsed metadata was not a JSON object. |
+| `schema_version_unsupported` | `schema_version` was not the supported v2 value. |
+| `kind_mismatch` | `kind` was not `resume`. |
+| `mode_unsupported` | `mode` was not `static` or `dynamic`. |
+| `url_mismatch` | Metadata URL did not match the current task URL. |
+| `target_path_mismatch` | Metadata target path did not match the current target. |
+| `file_size_mismatch` | Metadata file size did not match the current remote file size. |
+| `etag_mismatch` | Metadata etag did not match the current remote etag. |
+| `last_modified_mismatch` | Metadata last-modified value did not match the current response. |
+| `field_invalid` | A required metadata field was missing or had an invalid type/value. |
+| `segment_invalid` | A segment entry was malformed or internally inconsistent. |
+| `segment_layout_mismatch` | Segment ordering, indexes, coverage, or expected layout did not match. |
+| `partial_too_large` | An on-disk partial file was larger than its expected segment size. |
+
+These codes are intended for diagnostics and script branching. They should not be interpreted as download failure reasons. A task can reject old resume metadata, restart, and still complete successfully.
