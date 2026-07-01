@@ -203,6 +203,8 @@ v0.7.3 起，probe fallback reason code 被固定为公开诊断 contract：`hea
 
 v0.7.4 起，网络失败会写入结构化诊断字段：`network_error_phase`、`network_error_kind`、`network_http_status`，history/run JSON 还会提供归一化 `network_error` 对象。当前稳定阶段包括 `connect`、`header_head`、`header_get_probe`；稳定类型包括 `connection_timeout`、`connection_failed`、`http_status`。该诊断用于区分“HEAD 不 fallback 的 HTTP 失败”和“GET probe fallback 后的 HTTP 失败”，不改变 retry、queue 或下载行为。
 
+v0.7.5 起，range 下载阶段也进入 network taxonomy：static chunk 失败记录为 `network_error_phase=range_static`，dynamic range 失败记录为 `network_error_phase=range_dynamic`。range HTTP status 继续使用 `network_error_kind=http_status`，range body 不完整使用 `range_incomplete`，Content-Range / range response 校验失败使用 `range_response`。该版本不改变 queue schema，也不把每个 range 的详细错误复制进 task result；dynamic per-range 细节仍以 `dynamic-ranges.json` 和 resume metadata 为准。
+
 ### 重试与超时
 
 ```bash

@@ -386,6 +386,39 @@ history/run JSON payload 会额外提供归一化对象：
 
 v0.7.4 不改变 retry 策略，不改变 queue schema，也不把这些字段复制进 queue record。queue 仍用于调度和重试候选；完整网络诊断以 history/run 为准。
 
+v0.7.5 将 range 下载阶段纳入同一个 taxonomy，并固定两个 range phase：
+
+| phase | 含义 |
+| --- | --- |
+| `range_static` | static chunk 下载阶段失败 |
+| `range_dynamic` | dynamic range 下载阶段失败 |
+
+v0.7.5 额外稳定两个 range kind：
+
+| kind | 含义 |
+| --- | --- |
+| `range_incomplete` | range body 不完整，或 static chunk 汇总大小与目标文件大小不一致 |
+| `range_response` | Content-Range / range response 校验失败，且不能归类为普通 HTTP status |
+
+range HTTP status 仍使用既有 `http_status` kind，例如 static Range GET 503 会记录：
+
+```json
+{
+  "network_error": {
+    "present": true,
+    "phase": "range_static",
+    "kind": "http_status",
+    "http_status": 503
+  }
+}
+```
+
+dynamic bad `Content-Range` 会记录 `phase=range_dynamic`、`kind=range_response`，并保留 HTTP status，例如 `206`。dynamic short body 会记录 `phase=range_dynamic`、`kind=range_incomplete`。
+
+v0.7.5 还修正 static chunk task 的异常收割：static chunk task 完全未写入且遇到 range HTTP 错误时会向任务层冒泡，避免调度层吞掉异常后继续拆分；static 下载在 merge 前会检查所有 chunk 汇总大小是否等于目标大小，防止 short-body / 重叠 chunk 被错误 merge 成成功文件。
+
+边界：task-level `network_error_*` 只记录最终失败阶段和类别，不复制每个 range 的完整错误列表。dynamic per-range 细节继续由 `dynamic-ranges.json` 和 dynamic resume metadata 承担；queue schema 仍不扩展，queue `last_error` 文案不改变。
+
 ---
 
 ## 6. 回调命令
