@@ -304,6 +304,13 @@ v0.7.0 开始，pdman 的 header inspection 使用两阶段探测：
 
 这个策略用于兼容禁用或错误实现 HEAD 的服务器，不新增用户控制参数，也不改变后续 static chunk、dynamic range、resume metadata、history 或 debug JSON/JSONL 的输出结构。
 
+v0.7.1 对 probe 边界做了补强：
+
+- HEAD 请求被服务端直接断开连接时，会按 `head_connection_error` 记录内部 fallback reason，并进入 GET probe。
+- GET probe 如果被服务端忽略 Range 并返回 `200`，保留该响应的 `Content-Length`，用于已知大小下载。
+- GET probe 如果返回 `206` 且 `Content-Range` total 为 `*`，会丢弃 probe 响应自身的 `Content-Length`，按未知文件大小处理，避免把 `Range: bytes=0-0` 的 1-byte probe 误当成完整文件。
+- `Downloader.header_probe_method` 与 `Downloader.header_probe_fallback_reason` 目前是内部诊断字段，不进入稳定 JSON/JSONL 输出 contract。
+
 ---
 
 ## 6. 回调命令

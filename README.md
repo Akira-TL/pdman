@@ -195,6 +195,8 @@ v0.6.15 起，`docs/releases/v0.6.md` 汇总 0.6.x release notes、稳定 diagno
 
 v0.7.0 起，header 探测策略改为默认先发 `HEAD`；如果 `HEAD` 返回常见的 HEAD 不兼容状态（`403/404/405/501`），或 HEAD 请求发生连接类错误，pdman 会自动 fallback 到轻量 `GET` probe。GET probe 会带 `Range: bytes=0-0`，用于读取 `Content-Disposition`、`Content-Length`、`Accept-Ranges` 等元数据；当服务端返回 `206` 时，会从 `Content-Range` 中还原完整文件大小，避免 dynamic selector 把 probe body 大小误判为真实文件大小。该行为不新增 CLI 参数，不改变后续实际下载的 static/dynamic Range 请求；如果 GET probe 仍失败，或 HEAD 返回 retryable 5xx/限流状态，任务继续按 header check failure 记录为 failed。
 
+v0.7.1 起，请求探测边界进一步收紧：HEAD 直接断连会进入 GET probe fallback；如果 GET probe 被服务端忽略 Range 并返回 `200`，pdman 使用该响应的完整 `Content-Length`；如果 GET probe 返回 `206` 但 `Content-Range` total 为 `*`，pdman 会忽略 probe 自身的 `Content-Length: 1` 并按未知文件大小处理，避免只下载 1 byte。
+
 ### 重试与超时
 
 ```bash
