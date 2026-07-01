@@ -26,7 +26,11 @@ if TYPE_CHECKING:
 from .chunk import Chunk, STREAM_CHUNK_SIZE
 from .range_allocator import RangeAllocator, choose_dynamic_range_size
 from .range_metadata import DYNAMIC_RANGE_METADATA_FILENAME, write_range_metadata
-from .range_response import RangeResponseValidationError, validate_range_response
+from .range_response import (
+    RangeResponseValidationError,
+    parse_content_range,
+    validate_range_response,
+)
 from .resume_metadata import (
     RESUME_METADATA_FILENAME,
     ResumeMetadataError,
@@ -526,23 +530,62 @@ class Downloader:
                 )
             return fname
 
+    def _headers_from_response(self, response: aiohttp.ClientResponse) -> dict:
+        headers = dict(response.headers)
+        content_range = headers.get("Content-Range")
+        if response.status == 206 and content_range:
+            try:
+                parsed = parse_content_range(content_range)
+            except RangeResponseValidationError:
+                return headers
+            if parsed.total is not None:
+                headers["Content-Length"] = str(parsed.total)
+        return headers
+
+    async def _get_headers_via_get_probe(
+        self,
+        session: aiohttp.ClientSession,
+        headers_to_send: dict[str, str],
+    ) -> dict:
+        probe_headers = dict(headers_to_send)
+        probe_headers.setdefault("Range", "bytes=0-0")
+        async with session.get(
+            self.url,
+            allow_redirects=True,
+            timeout=self.parent.timeout,
+            headers=probe_headers,
+        ) as response:
+            if response.status in (200, 206):
+                return self._headers_from_response(response)
+            raise HeaderStatusSkip(
+                self.url,
+                response.status,
+                getattr(response, "reason", None),
+            )
+
     async def get_headers(self) -> dict:
         self.set_status(TaskStatus.HEADER_CHECKING)
         async with self._build_client_session() as session:
             headers_to_send = self.build_request_headers()
-            async with session.head(
-                self.url,
-                allow_redirects=True,
-                timeout=self.parent.timeout,
-                headers=headers_to_send,
-            ) as response:
-                if response.status in (200, 206):
-                    return response.headers
-                raise HeaderStatusSkip(
+            try:
+                async with session.head(
                     self.url,
-                    response.status,
-                    getattr(response, "reason", None),
+                    allow_redirects=True,
+                    timeout=self.parent.timeout,
+                    headers=headers_to_send,
+                ) as response:
+                    if response.status in (200, 206):
+                        return self._headers_from_response(response)
+                    self._logger.warning(
+                        "HEAD header probe returned "
+                        f"HTTP {response.status}; falling back to GET probe"
+                    )
+            except aiohttp.ClientConnectionError as e:
+                self._logger.warning(
+                    "HEAD header probe failed with connection error; "
+                    f"falling back to GET probe: {e}"
                 )
+            return await self._get_headers_via_get_probe(session, headers_to_send)
 
     async def get_url_file_size(self) -> int:
         file_size = None

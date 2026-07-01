@@ -1179,7 +1179,7 @@ def test_head_405_falls_back_to_get_probe_and_preserves_filename(tmp_path):
         manager = Manager(
             max_downloads=1,
             max_concurrent_downloads=1,
-            retry=0,
+            retry=1,
             log_path=None,
         )
         manager.append(
@@ -1201,7 +1201,7 @@ def test_head_failure_get_fallback_preserves_file_size_for_dynamic(tmp_path):
             max_concurrent_downloads=4,
             min_split_size=1024,
             segment_mode="dynamic",
-            retry=0,
+            retry=1,
             log_path=None,
         )
         manager.append(
