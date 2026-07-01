@@ -3,6 +3,7 @@ import json
 from pdman.output import (
     history_records_payload,
     header_probe_payload,
+    network_error_payload,
     print_jsonl,
     run_detail_payload,
     resume_rejection_payload,
@@ -83,6 +84,42 @@ def test_header_probe_payload_from_task_result_and_history_record():
 
 
 
+def test_network_error_payload_from_task_result_and_history_record():
+    result = TaskResult(
+        url="https://example.com/file.bin",
+        filename="file.bin",
+        status=TaskStatus.FAILED,
+        network_error_phase="header_get_probe",
+        network_error_kind="http_status",
+        network_http_status=500,
+    )
+    record = {
+        "network_error_phase": "header_head",
+        "network_error_kind": "http_status",
+        "network_http_status": 503,
+    }
+
+    assert network_error_payload(result) == {
+        "present": True,
+        "phase": "header_get_probe",
+        "kind": "http_status",
+        "http_status": 500,
+    }
+    assert network_error_payload(record) == {
+        "present": True,
+        "phase": "header_head",
+        "kind": "http_status",
+        "http_status": 503,
+    }
+    assert network_error_payload({}) == {
+        "present": False,
+        "phase": None,
+        "kind": None,
+        "http_status": None,
+    }
+
+
+
 def test_history_records_payload_includes_resume_diagnostics():
     records = [
         {
@@ -94,6 +131,9 @@ def test_history_records_payload_includes_resume_diagnostics():
             "resume_rejection_reason": "Resume rejected [file_size_mismatch]: file_size mismatch",
             "header_probe_method": "GET",
             "header_probe_fallback_reason": "head_http_405",
+            "network_error_phase": "header_get_probe",
+            "network_error_kind": "http_status",
+            "network_http_status": 500,
         },
         {
             "run_id": "run-1",
@@ -117,6 +157,12 @@ def test_history_records_payload_includes_resume_diagnostics():
         "fallback_used": True,
         "fallback_reason": "head_http_405",
     }
+    assert payload["records"][0]["network_error"] == {
+        "present": True,
+        "phase": "header_get_probe",
+        "kind": "http_status",
+        "http_status": 500,
+    }
     assert payload["records"][1]["resume_rejection"] == {
         "present": False,
         "code": None,
@@ -126,6 +172,12 @@ def test_history_records_payload_includes_resume_diagnostics():
         "method": None,
         "fallback_used": False,
         "fallback_reason": None,
+    }
+    assert payload["records"][1]["network_error"] == {
+        "present": False,
+        "phase": None,
+        "kind": None,
+        "http_status": None,
     }
 
 

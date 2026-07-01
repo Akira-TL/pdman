@@ -64,6 +64,13 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                 return
             self._send_payload(PAYLOAD, f"head-http-{status}.bin", send_body)
             return
+        if parsed.path == "/head-405-get-status.bin":
+            status = int(parse_qs(parsed.query).get("status", ["500"])[0])
+            if not send_body:
+                self._send_text(405, b"HEAD not allowed")
+                return
+            self._send_text(status, f"GET probe HTTP {status}".encode())
+            return
         if parsed.path == "/head-close-get-ok.bin":
             if not send_body:
                 self.close_connection = True
@@ -1216,6 +1223,63 @@ def test_header_http_status_is_failed_without_raising(tmp_path):
         assert not list(tmp_path.glob(".pdman.*"))
         assert manager.results[0].status == TaskStatus.FAILED
         assert manager.results[0].reason_code == TaskReason.HTTP_STATUS
+        assert manager.results[0].network_error_phase == "header_head"
+        assert manager.results[0].network_error_kind == "http_status"
+        assert manager.results[0].network_http_status == 503
+        assert manager.results[0].header_probe_method == "HEAD"
+        assert manager.results[0].header_probe_fallback_reason is None
+        assert manager.exit_code == 1
+
+
+def test_head_retryable_status_does_not_fallback_to_get_probe(tmp_path):
+    with LocalDownloadServer() as server:
+        for status in (429, 503):
+            manager = Manager(
+                max_downloads=1,
+                max_concurrent_downloads=1,
+                retry=0,
+                log_path=None,
+            )
+            manager.append(
+                server.url(f"/status.bin?status={status}"),
+                file_name=f"retryable-{status}.bin",
+                dir_path=str(tmp_path / str(status)),
+            )
+            asyncio.run(manager.download())
+
+            assert manager.results[0].status == TaskStatus.FAILED
+            assert manager.results[0].reason_code == TaskReason.HTTP_STATUS
+            assert manager.results[0].network_error_phase == "header_head"
+            assert manager.results[0].network_error_kind == "http_status"
+            assert manager.results[0].network_http_status == status
+            assert manager.results[0].header_probe_method == "HEAD"
+            assert manager.results[0].header_probe_fallback_reason is None
+            assert manager.exit_code == 1
+
+
+def test_get_probe_http_status_records_probe_phase(tmp_path):
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=1,
+            retry=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/head-405-get-status.bin?status=500"),
+            file_name="probe-failed.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert not (tmp_path / "probe-failed.bin").exists()
+        assert manager.results[0].status == TaskStatus.FAILED
+        assert manager.results[0].reason_code == TaskReason.HTTP_STATUS
+        assert manager.results[0].network_error_phase == "header_get_probe"
+        assert manager.results[0].network_error_kind == "http_status"
+        assert manager.results[0].network_http_status == 500
+        assert manager.results[0].header_probe_method == "GET"
+        assert manager.results[0].header_probe_fallback_reason == "head_http_405"
         assert manager.exit_code == 1
 
 
