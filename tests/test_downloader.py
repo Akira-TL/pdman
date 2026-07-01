@@ -433,6 +433,8 @@ def test_rebuild_task_uses_legacy_tmp_metadata_after_stale_cache_metadata(tmp_pa
         assert root.end == 4
         assert root.size == 5
         assert partial_path.exists()
+        assert downloader.resume_rejection_code is None
+        assert downloader.resume_rejection_reason is None
         assert any("ignoring stale cache metadata" in item for item in warnings)
         assert not any("discarding stale temp files" in item for item in warnings)
 

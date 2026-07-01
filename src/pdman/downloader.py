@@ -838,6 +838,8 @@ class Downloader:
                         expected_last_modified=self._header_last_modified(),
                         inspect_partials=True,
                     )
+                    self.resume_rejection_code = None
+                    self.resume_rejection_reason = None
                     return self._chunks_from_resume_segments(inspect_resume_segments(payload))
                 except ResumeMetadataError as e:
                     rejection_message = format_resume_rejection(e)
