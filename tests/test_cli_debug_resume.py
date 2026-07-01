@@ -99,6 +99,74 @@ def test_cli_debug_resume_jsonl(tmp_path, capsys):
     assert [json.loads(line)["state"] for line in lines] == ["completed", "partial"]
 
 
+def test_cli_debug_resume_state_filter_readable(tmp_path, capsys):
+    metadata_path = write_resume_metadata(tmp_path)
+
+    exit_code = cli.main([
+        "debug",
+        "resume",
+        "--metadata",
+        str(metadata_path),
+        "--state",
+        "partial",
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "filter: state=partial" in output
+    assert "filtered: total=1 completed=0 partial=1 pending=0 failed=0" in output
+    assert "#1 1024-2047 state=partial" in output
+    assert "#0 0-1023 state=completed" not in output
+
+
+def test_cli_debug_resume_state_filter_json(tmp_path, capsys):
+    metadata_path = write_resume_metadata(tmp_path)
+
+    exit_code = cli.main([
+        "debug",
+        "resume",
+        "--metadata",
+        str(metadata_path),
+        "--state",
+        "completed",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["filter"] == {"state": "completed"}
+    assert payload["count"] == 1
+    assert payload["filtered_stats"] == {
+        "total_segments": 1,
+        "completed_count": 1,
+        "partial_count": 0,
+        "pending_count": 0,
+        "failed_count": 0,
+        "existing_bytes": 1024,
+        "expected_bytes": 1024,
+    }
+    assert [item["index"] for item in payload["segments"]] == [0]
+
+
+def test_cli_debug_resume_state_filter_jsonl(tmp_path, capsys):
+    metadata_path = write_resume_metadata(tmp_path)
+
+    exit_code = cli.main([
+        "debug",
+        "resume",
+        "--metadata",
+        str(metadata_path),
+        "--state",
+        "partial",
+        "--jsonl",
+    ])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert len(lines) == 1
+    assert json.loads(lines[0])["state"] == "partial"
+
+
 def test_cli_debug_resume_invalid_metadata_exits_non_zero(tmp_path, capsys):
     payload = resume_payload(tmp_path)
     payload["schema_version"] = 1
