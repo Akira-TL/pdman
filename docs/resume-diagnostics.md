@@ -175,7 +175,7 @@ pdman debug resume --metadata /path/to/resume-metadata.json --state partial --js
 pdman debug resume --latest --search-root /path/to/tmp --json
 ```
 
-This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the cache root for the newest valid `resume-metadata.json`. If `--search-root` is provided, that directory becomes the strict search boundary and default roots are not added. With `--state`, readable output shows filter and filtered stats, JSON output includes `filter`, `count`, and `filtered_stats`, and JSONL emits only matching segments. `--metadata` and `--latest` are mutually exclusive source selectors.
+This command reads `resume-metadata.json`, validates it, refreshes current partial sizes for its segments, and renders readable, JSON, or JSONL diagnostics. It does not modify metadata or partial files and does not recover downloads. With `--latest`, it scans the cache root for the newest valid `resume-metadata.json`. If `--cache-dir` is provided, that cache dir is the only default root. If `--search-root` is provided, that directory becomes the strict search boundary and default roots are not added. Invalid metadata candidates are skipped during latest discovery. With `--state`, readable output shows filter and filtered stats, JSON output includes `filter`, `count`, and `filtered_stats`, and JSONL emits only matching segments. `--metadata` and `--latest` are mutually exclusive source selectors.
 
 ### For dynamic allocator debugging
 
@@ -186,7 +186,7 @@ pdman debug ranges --json
 pdman debug ranges --jsonl
 ```
 
-This inspects `dynamic-ranges.json`, not resume recovery state. New runs write it to the cache metadata directory rather than task tmp. Use it when debugging dynamic range selection, split behavior, attempts, or fallback reasons. Do not use it to decide whether temporary files are safe to reuse.
+This inspects `dynamic-ranges.json`, not resume recovery state. New runs write it to the cache metadata directory rather than task tmp. `--latest` follows the same cache/search-root boundary rules as `debug resume` and skips invalid candidates. Use it when debugging dynamic range selection, split behavior, attempts, or fallback reasons. Do not use it to decide whether temporary files are safe to reuse.
 
 ## Stable fields for scripts and agents
 

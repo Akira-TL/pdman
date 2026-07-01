@@ -432,6 +432,29 @@ v0.7.6 起，新运行不再把 metadata 写入 task tmp 目录：
 
 兼容边界：旧 tmp 中已经存在的 `resume-metadata.json` 仍可被 `--continue` 读取；旧 `.pdm` 仍作为最后 fallback 读取。但新运行不会再写这些 tmp metadata。cache metadata 如果校验失败，只会被忽略，不会直接清理 tmp partial；只有 legacy tmp v2 metadata 校验失败时才清理 tmp。
 
+v0.7.7 固定 cache metadata 生命周期和 fallback 优先级：
+
+1. 优先尝试 cache `resume-metadata.json`。
+2. cache metadata valid 时使用该 layout。
+3. cache metadata stale / invalid 时只忽略，不清理 tmp partial。
+4. 继续尝试 legacy tmp `resume-metadata.json`。
+5. legacy tmp v2 metadata invalid 时清理 tmp，不 fallback 到 `.pdm`。
+6. 最后才尝试 legacy `.pdm`。
+
+如果先遇到 stale cache metadata，随后成功使用 legacy tmp metadata，pdman 会清除此前 stale cache rejection 诊断，避免成功恢复后携带误导性 rejection 字段。`pdman debug resume --latest --cache-dir <dir>` 和 `pdman debug ranges --latest --cache-dir <dir>` 只搜索指定 cache dir；latest discovery 会跳过 mtime 更新但无效的 metadata，选择最新 valid metadata。
+
+cache metadata 当前 layout：
+
+```text
+cache_root/
+  metadata/
+    <url-hash>/
+      resume-metadata.json
+      dynamic-ranges.json
+```
+
+`<url-hash>` 当前由 URL hash 前缀生成。该目录结构是 cache layout，不是 database schema；后续 records/database 查询层应单独版本规划。
+
 ---
 
 ## 6. 回调命令

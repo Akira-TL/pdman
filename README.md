@@ -207,6 +207,8 @@ v0.7.5 起，range 下载阶段也进入 network taxonomy：static chunk 失败�
 
 v0.7.6 起，新运行不再把 `.pdm`、`resume-metadata.json` 或 `dynamic-ranges.json` 写入 task tmp 目录；tmp 只保留 chunk / partial 文件。resume 与 dynamic range metadata 改写入 cache metadata 目录，`pdman debug resume --latest` 和 `pdman debug ranges --latest` 默认只搜索 cache root。显式传入 `--search-root` 时，该 root 是严格搜索边界，不再混入默认 tmp/cache root。旧 tmp 中已有的 `resume-metadata.json` 和 `.pdm` 仍可作为兼容 fallback 读取。
 
+v0.7.7 起，cache metadata 生命周期边界进一步固定：stale cache resume metadata 校验失败时只会被忽略，不会清理 tmp partial，也不会阻断旧 tmp `resume-metadata.json` / `.pdm` fallback；如果随后成功使用 legacy tmp metadata，会清除此前 stale cache rejection 诊断。`debug --latest --cache-dir <dir>` 只搜索指定 cache dir，latest 会跳过更新但无效的 metadata，选择最新 valid metadata。cache metadata 当前位于 `cache_root/metadata/<url-hash>/`，这是 cache layout，不是数据库 schema。
+
 ### 重试与超时
 
 ```bash
