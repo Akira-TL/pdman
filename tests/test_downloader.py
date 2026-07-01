@@ -3,10 +3,25 @@ import json
 from types import SimpleNamespace
 
 from pdman.chunk import Chunk
-from pdman.downloader import Downloader
+from pdman.downloader import Downloader, HeaderStatusSkip, header_probe_http_fallback_reason
 from pdman.manager import Manager
+from pdman.downloader import HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR
 from pdman.resume_metadata import RESUME_METADATA_FILENAME, static_resume_metadata_payload
 from pdman.status import TaskReason, TaskStatus
+
+
+def test_header_probe_reason_contract():
+    assert HeaderStatusSkip.GET_FALLBACK_STATUS_CODES == {403, 404, 405, 501}
+    assert {
+        status: header_probe_http_fallback_reason(status)
+        for status in HeaderStatusSkip.GET_FALLBACK_STATUS_CODES
+    } == {
+        403: "head_http_403",
+        404: "head_http_404",
+        405: "head_http_405",
+        501: "head_http_501",
+    }
+    assert HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR == "head_connection_error"
 
 
 def test_downloader_dynamic_segment_support_checks(tmp_path):

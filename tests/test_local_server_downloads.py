@@ -57,6 +57,13 @@ class LocalDownloadHandler(BaseHTTPRequestHandler):
                 return
             self._send_payload(PAYLOAD, "head-501-get-ok.bin", send_body)
             return
+        if parsed.path == "/head-status-get-ok.bin":
+            status = int(parse_qs(parsed.query).get("status", ["405"])[0])
+            if not send_body:
+                self._send_text(status, f"HEAD HTTP {status}".encode())
+                return
+            self._send_payload(PAYLOAD, f"head-http-{status}.bin", send_body)
+            return
         if parsed.path == "/head-close-get-ok.bin":
             if not send_body:
                 self.close_connection = True
@@ -1258,6 +1265,31 @@ def test_head_get_fallback_is_written_to_runtime_history(tmp_path):
         )
         assert history_record["header_probe_method"] == "GET"
         assert history_record["header_probe_fallback_reason"] == "head_http_405"
+
+
+
+def test_head_http_fallback_reason_codes_are_stable(tmp_path):
+    with LocalDownloadServer() as server:
+        for status in (403, 404, 405, 501):
+            target_dir = tmp_path / str(status)
+            manager = Manager(
+                max_downloads=1,
+                max_concurrent_downloads=1,
+                retry=1,
+                log_path=None,
+            )
+            manager.append(
+                server.url(f"/head-status-get-ok.bin?status={status}"),
+                file_name=f"fallback-{status}.bin",
+                dir_path=str(target_dir),
+            )
+            asyncio.run(manager.download())
+
+            assert (target_dir / f"fallback-{status}.bin").read_bytes() == PAYLOAD
+            assert manager.results[0].status == TaskStatus.COMPLETED
+            assert manager.results[0].header_probe_method == "GET"
+            assert manager.results[0].header_probe_fallback_reason == f"head_http_{status}"
+            assert manager.exit_code == 0
 
 
 
