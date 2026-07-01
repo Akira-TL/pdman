@@ -225,6 +225,31 @@ def test_cli_debug_resume_latest_jsonl(tmp_path, capsys):
     assert [json.loads(line)["state"] for line in lines] == ["completed", "partial"]
 
 
+def test_cli_debug_resume_latest_defaults_to_cache_only(tmp_path, monkeypatch, capsys):
+    default_tmp = tmp_path / "default-tmp"
+    default_cache = tmp_path / "default-cache"
+    default_tmp.mkdir()
+    default_cache.mkdir()
+    tmp_candidate = write_resume_metadata(default_tmp)
+    cache_candidate = write_resume_metadata(default_cache)
+    os.utime(tmp_candidate, (300, 300))
+    os.utime(cache_candidate, (100, 100))
+    monkeypatch.setattr(cli, "default_system_tmp_root", lambda: default_tmp)
+    monkeypatch.setattr(cli, "default_cache_root", lambda: default_cache)
+
+    exit_code = cli.main([
+        "debug",
+        "resume",
+        "--latest",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["source_path"] == str(cache_candidate)
+
+
+
 def test_cli_debug_resume_latest_search_root_ignores_default_tmp_and_cache(
     tmp_path, monkeypatch, capsys
 ):

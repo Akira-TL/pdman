@@ -484,6 +484,7 @@ def test_dynamic_failed_download_with_keep_tmp_retains_range_and_resume_metadata
 
         assert not list(tmp_root.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
         assert not list(tmp_root.glob(f"**/{RESUME_METADATA_FILENAME}"))
+        assert not list(tmp_root.glob("**/.pdm"))
         metadata_files = list(cache_dir.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
         assert len(metadata_files) == 1
         payload = json.loads(metadata_files[0].read_text())
@@ -534,6 +535,7 @@ def test_auto_segment_download_metadata_includes_selector_diagnostics(tmp_path):
         asyncio.run(manager.download())
 
         assert not list(tmp_root.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
+        assert not list(tmp_root.glob("**/.pdm"))
         metadata_files = list(cache_dir.glob(f"**/{DYNAMIC_RANGE_METADATA_FILENAME}"))
         assert len(metadata_files) == 1
         payload = json.loads(metadata_files[0].read_text())

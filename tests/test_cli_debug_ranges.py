@@ -210,6 +210,31 @@ def test_cli_debug_ranges_latest_jsonl_honors_state_filter(tmp_path, capsys):
     assert json.loads(lines[0])["state"] == "failed"
 
 
+def test_cli_debug_ranges_latest_defaults_to_cache_only(tmp_path, monkeypatch, capsys):
+    default_tmp = tmp_path / "default-tmp"
+    default_cache = tmp_path / "default-cache"
+    default_tmp.mkdir()
+    default_cache.mkdir()
+    tmp_candidate = write_metadata(default_tmp)
+    cache_candidate = write_metadata(default_cache)
+    os.utime(tmp_candidate, (300, 300))
+    os.utime(cache_candidate, (100, 100))
+    monkeypatch.setattr(cli, "default_system_tmp_root", lambda: default_tmp)
+    monkeypatch.setattr(cli, "default_cache_root", lambda: default_cache)
+
+    exit_code = cli.main([
+        "debug",
+        "ranges",
+        "--latest",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["source_path"] == str(cache_candidate)
+
+
+
 def test_cli_debug_ranges_latest_search_root_is_strict(
     tmp_path, monkeypatch, capsys
 ):
