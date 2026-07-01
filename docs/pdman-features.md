@@ -277,6 +277,8 @@ v0.6.7 新增内部 JSON payload helper：`resume_rejection_payload(...)` 可从
 
 v0.6.8 为 `pdman history` 增加 `--json` / `--jsonl`，输出 records/count，并在每条 history record 中包含 `resume_rejection` payload。该版本只扩展 history 输出，不扩展 `pdman run`、queue 或 debug ranges，也不暴露完整 resume metadata。
 
+v0.6.9 为 `pdman run <run_id>` 增加 `--json`，输出 run 摘要、tasks 和每个 task 的 `resume_rejection` payload。该版本只扩展 run detail JSON，不新增 `pdman run --jsonl`，不改变 human run detail、queue 或 debug ranges 输出。
+
 ---
 
 ## 6. 回调命令
