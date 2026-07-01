@@ -40,6 +40,9 @@ class TaskResult:
     total_bytes: int | None = None
     header_probe_method: str | None = None
     header_probe_fallback_reason: str | None = None
+    network_error_phase: str | None = None
+    network_error_kind: str | None = None
+    network_http_status: int | None = None
     resume_rejection_code: str | None = None
     resume_rejection_reason: str | None = None
 

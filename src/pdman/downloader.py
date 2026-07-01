@@ -48,6 +48,12 @@ from .status import TaskReason, TaskResult, TaskStatus
 
 
 HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR = "head_connection_error"
+NETWORK_ERROR_PHASE_CONNECT = "connect"
+NETWORK_ERROR_PHASE_HEADER_HEAD = "header_head"
+NETWORK_ERROR_PHASE_HEADER_GET_PROBE = "header_get_probe"
+NETWORK_ERROR_KIND_CONNECTION_FAILED = "connection_failed"
+NETWORK_ERROR_KIND_CONNECTION_TIMEOUT = "connection_timeout"
+NETWORK_ERROR_KIND_HTTP_STATUS = "http_status"
 
 
 def header_probe_http_fallback_reason(status: int) -> str:
@@ -59,8 +65,11 @@ class ConnectionTimeoutSkip(Exception):
         self,
         message: str,
         reason_code: TaskReason = TaskReason.CONNECTION_TIMEOUT,
+        network_error_phase: str = NETWORK_ERROR_PHASE_CONNECT,
     ):
         self.reason_code = reason_code
+        self.network_error_phase = network_error_phase
+        self.network_error_kind = reason_code.value
         super().__init__(message)
 
 
@@ -68,10 +77,18 @@ class HeaderStatusSkip(Exception):
     RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
     GET_FALLBACK_STATUS_CODES = {403, 404, 405, 501}
 
-    def __init__(self, url: str, status: int, reason: str | None = None):
+    def __init__(
+        self,
+        url: str,
+        status: int,
+        reason: str | None = None,
+        network_error_phase: str = NETWORK_ERROR_PHASE_HEADER_HEAD,
+    ):
         self.url = url
         self.status = status
         self.reason = reason or ""
+        self.network_error_phase = network_error_phase
+        self.network_error_kind = NETWORK_ERROR_KIND_HTTP_STATUS
         super().__init__(self.describe())
 
     @property
@@ -163,6 +180,9 @@ class Downloader:
         self.header_info = None
         self.header_probe_method: str | None = None
         self.header_probe_fallback_reason: str | None = None
+        self.network_error_phase: str | None = None
+        self.network_error_kind: str | None = None
+        self.network_http_status: int | None = None
         self.log_path = log_path
         self._downloaded = False
         self._done = False
@@ -291,6 +311,9 @@ class Downloader:
             downloaded_bytes=self._result_bytes(),
             header_probe_method=self.header_probe_method,
             header_probe_fallback_reason=self.header_probe_fallback_reason,
+            network_error_phase=self.network_error_phase,
+            network_error_kind=self.network_error_kind,
+            network_http_status=self.network_http_status,
             resume_rejection_code=self.resume_rejection_code,
             resume_rejection_reason=self.resume_rejection_reason,
             total_bytes=self.file_size if self.file_size > 0 else None,
@@ -575,6 +598,7 @@ class Downloader:
                 self.url,
                 response.status,
                 getattr(response, "reason", None),
+                network_error_phase=NETWORK_ERROR_PHASE_HEADER_GET_PROBE,
             )
 
     async def get_headers(self) -> dict:
@@ -597,6 +621,7 @@ class Downloader:
                             self.url,
                             response.status,
                             getattr(response, "reason", None),
+                            network_error_phase=NETWORK_ERROR_PHASE_HEADER_HEAD,
                         )
                     self.header_probe_fallback_reason = header_probe_http_fallback_reason(
                         response.status
@@ -1308,6 +1333,9 @@ class Downloader:
                 )
                 break
             except HeaderStatusSkip as e:
+                self.network_error_phase = e.network_error_phase
+                self.network_error_kind = e.network_error_kind
+                self.network_http_status = e.status
                 if e.can_retry and _iter > 0:
                     self.set_status(
                         TaskStatus.RETRYING,
@@ -1334,6 +1362,9 @@ class Downloader:
                     error=str(e),
                 )
             except ConnectionTimeoutSkip as e:
+                self.network_error_phase = e.network_error_phase
+                self.network_error_kind = e.network_error_kind
+                self.network_http_status = None
                 reason = str(e)
                 self._logger.error(f"Failed {self.filename or self.url}: {reason}.")
                 if self.pdm_tmp and not self.parent.keep_tmp:

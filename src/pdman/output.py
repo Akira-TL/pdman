@@ -44,6 +44,23 @@ def header_probe_payload(source: TaskResult | dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def network_error_payload(source: TaskResult | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(source, TaskResult):
+        phase = source.network_error_phase
+        kind = source.network_error_kind
+        http_status = source.network_http_status
+    else:
+        phase = source.get("network_error_phase")
+        kind = source.get("network_error_kind")
+        http_status = source.get("network_http_status")
+    return {
+        "present": bool(phase or kind or http_status),
+        "phase": phase,
+        "kind": kind,
+        "http_status": http_status,
+    }
+
+
 def history_records_payload(
     records: list[dict[str, Any]],
     key: str = "records",
@@ -53,6 +70,7 @@ def history_records_payload(
         item = dict(record)
         item["resume_rejection"] = resume_rejection_payload(record)
         item["header_probe"] = header_probe_payload(record)
+        item["network_error"] = network_error_payload(record)
         serialized.append(item)
     return {key: serialized, "count": len(serialized)}
 
