@@ -418,6 +418,50 @@ def test_records_doctor_payload_reports_history_and_metadata_health(tmp_path):
     ]
 
 
+def test_records_doctor_payload_filters_issues_by_severity_and_code(tmp_path):
+    write_history(
+        tmp_path,
+        [
+            {
+                "status": "unknown",
+            }
+        ],
+    )
+
+    payload = records_doctor_payload(
+        str(tmp_path),
+        severities={"warning"},
+        codes={"invalid_status"},
+    )
+
+    assert payload["status"] == "warning"
+    assert payload["issue_count"] == 1
+    assert payload["total_issue_count"] == 4
+    assert payload["filters"] == {
+        "severities": ["warning"],
+        "codes": ["invalid_status"],
+    }
+    assert [issue["code"] for issue in payload["issues"]] == ["invalid_status"]
+
+
+def test_records_doctor_payload_filter_can_make_status_ok(tmp_path):
+    write_history(
+        tmp_path,
+        [
+            {
+                "task_id": "task-1",
+                "status": "completed",
+            }
+        ],
+    )
+
+    payload = records_doctor_payload(str(tmp_path), severities={"error"})
+
+    assert payload["status"] == "ok"
+    assert payload["issue_count"] == 0
+    assert payload["total_issue_count"] == 2
+
+
 def test_records_doctor_exit_code_honors_fail_on_thresholds(tmp_path):
     write_history(
         tmp_path,

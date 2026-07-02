@@ -153,10 +153,26 @@ def _metadata_state_for_record(cache_dir: str | None, record: dict[str, Any]) ->
     return "missing"
 
 
+def _filter_doctor_issues(
+    issues: list[dict[str, Any]],
+    *,
+    severities: set[str] | None = None,
+    codes: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    filtered = issues
+    if severities:
+        filtered = [issue for issue in filtered if issue.get("severity") in severities]
+    if codes:
+        filtered = [issue for issue in filtered if issue.get("code") in codes]
+    return filtered
+
+
 def records_doctor_payload(
     cache_dir: str | None = None,
     *,
     limit: int | None = 0,
+    severities: set[str] | None = None,
+    codes: set[str] | None = None,
 ) -> dict[str, Any]:
     records = query_records(cache_dir, limit=limit)
     status_counts = {status: 0 for status in VALID_STATUSES}
@@ -203,6 +219,8 @@ def records_doctor_payload(
                 )
             )
         metadata_state_counts[_metadata_state_for_record(cache_dir, record)] += 1
+    total_issue_count = len(issues)
+    issues = _filter_doctor_issues(issues, severities=severities, codes=codes)
     error_count = sum(1 for issue in issues if issue.get("severity") == "error")
     warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
     return {
@@ -210,6 +228,11 @@ def records_doctor_payload(
         "status": "error" if error_count else "warning" if warning_count else "ok",
         "records_checked": len(records),
         "issue_count": len(issues),
+        "total_issue_count": total_issue_count,
+        "filters": {
+            "severities": sorted(severities) if severities else [],
+            "codes": sorted(codes) if codes else [],
+        },
         "warning_count": warning_count,
         "error_count": error_count,
         "status_counts": status_counts,
@@ -307,12 +330,16 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
             "filters": {
                 "limit": "recent_count; zero means unlimited",
                 "fail_on": "never|warning|error; controls CLI exit code only",
+                "severity": "info|warning|error; repeatable issue filter",
+                "code": "exact issue code; repeatable issue filter",
             },
             "json_shape": {
                 "schema_version": "int",
                 "status": "ok|warning|error",
                 "records_checked": "int",
                 "issue_count": "int",
+                "total_issue_count": "int",
+                "filters": "active issue filters",
                 "status_counts": "dict[str,int]",
                 "metadata_state_counts": "dict[str,int]",
                 "issues": "list[doctor_issue]",

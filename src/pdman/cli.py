@@ -185,12 +185,24 @@ def handle_records_doctor_command(argv=None) -> int:
         choices=("never", "warning", "error"),
         default="never",
     )
+    parser.add_argument(
+        "--severity",
+        action="append",
+        choices=("info", "warning", "error"),
+        default=[],
+    )
+    parser.add_argument("--code", action="append", default=[])
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--json", action="store_true")
     output_group.add_argument("--jsonl", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
-    payload = records_doctor_payload(args.cache_dir, limit=args.limit)
+    payload = records_doctor_payload(
+        args.cache_dir,
+        limit=args.limit,
+        severities=set(args.severity) or None,
+        codes=set(args.code) or None,
+    )
     exit_code = records_doctor_exit_code(payload, args.fail_on)
     if args.json:
         print_json(payload)

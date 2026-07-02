@@ -273,6 +273,67 @@ def test_cli_records_doctor_jsonl_outputs_issues(tmp_path, capsys):
     ]
 
 
+def test_cli_records_doctor_jsonl_filters_issues(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "status": "unknown",
+            }
+        ],
+    )
+
+    exit_code = cli.main(
+        [
+            "records",
+            "doctor",
+            "--severity",
+            "warning",
+            "--code",
+            "invalid_status",
+            "--jsonl",
+            "--cache-dir",
+            str(tmp_path),
+        ]
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert [json.loads(line)["code"] for line in lines] == ["invalid_status"]
+
+
+def test_cli_records_doctor_filtered_status_controls_fail_on(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "task_id": "task-1",
+                "status": "completed",
+            }
+        ],
+    )
+
+    exit_code = cli.main(
+        [
+            "records",
+            "doctor",
+            "--severity",
+            "error",
+            "--fail-on",
+            "warning",
+            "--json",
+            "--cache-dir",
+            str(tmp_path),
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["status"] == "ok"
+    assert payload["issue_count"] == 0
+    assert payload["total_issue_count"] == 2
+
+
 def test_cli_records_doctor_fail_on_warning_returns_one(tmp_path, capsys):
     write_history(
         tmp_path,

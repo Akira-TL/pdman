@@ -350,6 +350,7 @@ pdman records doctor
 pdman records doctor --json
 pdman records doctor --jsonl
 pdman records doctor --fail-on warning
+pdman records doctor --severity warning --code invalid_status --jsonl
 pdman records schema
 pdman records schema --surface show --json
 ```
@@ -371,6 +372,8 @@ v0.8.6 起，records JSON 的诊断边界更稳定：metadata locator 固定包�
 v0.8.7 起，`pdman records doctor` 提供只读 records 健康检查，统计 history record 数量、status 分布、metadata locator 状态，并用结构化 `issues` 报告 `invalid_status`、`run_id_missing`、`task_id_missing`、`url_missing` 等问题。它不修复历史、不迁移 schema、不读取完整 metadata。
 
 v0.8.8 起，`records doctor` 支持 `--fail-on never|warning|error`。默认 `never` 保持 exit code 0；`warning` 会在 doctor 状态为 warning/error 时返回 1；`error` 只在状态为 error 时返回 1，方便 CI 或 agent workflow 按阈值失败。
+
+v0.8.9 起，`records doctor` 支持 repeatable `--severity info|warning|error` 和 `--code ISSUE_CODE` 过滤 issues。过滤会影响输出的 `issues`、`issue_count` 和 doctor `status`，但会保留 `total_issue_count` 表示过滤前问题总数。
 
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 
