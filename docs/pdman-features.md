@@ -480,6 +480,8 @@ v0.7.10 新增 `docs/releases/v0.7.md`，汇总 0.7.x request probe、network ta
 
 v0.7.11 修复下载进度生命周期：同一个 Downloader 在 static / dynamic 下载、task-level retry 和 merge 期间只复用一条 Rich progress task，终态时停止该 task。这个 hotfix 用于避免 retry 后出现多条同名 `Downloading ...` 进度、旧进度 elapsed 继续增加以及重复 completed download 日志。该版本不改变 retry/backoff、分块调度、request probe、queue schema、history/run JSON 或 metadata contract。
 
+v0.7.12 发布 v0.7.11 tag 之后累积的 hotfix：static chunk 写入前会重建缺失父目录，static range 的连接类错误保持在 chunk-local retry 内，已完成 chunk 不再重新调度，static resume metadata 在关键 retry 边界刷新，控制台日志不再额外插入空行。该版本只做 0.7.x 可靠性与发布对齐修复，不引入动态 chunk 分配、自适应并发、queue schema、history/run JSON 或 metadata contract 变化。
+
 ---
 
 ## 6. 回调命令

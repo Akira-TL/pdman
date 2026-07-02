@@ -215,6 +215,8 @@ v0.7.10 起，`docs/releases/v0.7.md` 汇总 0.7.x 的 request probe、network t
 
 v0.7.11 起，下载任务的 Rich progress 生命周期收束为“一个 Downloader 只创建一个下载进度 task”。static / dynamic 下载、task-level retry 和 merge 会复用同一条进度；任务进入 completed / skipped / failed 等终态时停止该进度，避免 retry 后出现多条同名下载进度、旧进度 elapsed 继续增加或重复显示 completed download 日志。该版本不改变 retry/backoff、分块调度、请求策略、queue schema、history/run JSON 或 metadata contract。
 
+v0.7.12 起，发布 v0.7.11 tag 之后累积的 static hotfix：chunk 写入前重建缺失父目录，static range 连接类错误保持 chunk-local retry，已完成 chunk 不再重复调度，static resume metadata 在关键 retry 边界刷新，控制台日志不再额外插入空行。该版本只做 0.7.x 可靠性与发布对齐修复，不引入动态 chunk 分配、自适应并发、queue schema、history/run JSON 或 metadata contract 变化。
+
 ### 重试与超时
 
 ```bash
