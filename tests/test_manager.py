@@ -1,6 +1,9 @@
 import asyncio
 import json
 import types
+from io import StringIO
+
+from rich.console import Console
 
 from pdman.downloader import Downloader
 from pdman.manager import Manager
@@ -35,6 +38,19 @@ def test_max_downloads_limits_url_task_concurrency(tmp_path):
         assert manager._downloaders == []
 
     asyncio.run(run_case())
+
+
+def test_manager_console_log_sink_does_not_add_blank_lines():
+    capture = StringIO()
+    manager = Manager(log_path=None)
+    manager._console = Console(file=capture, force_terminal=False, width=120)
+    manager._reparse_logging()
+
+    manager._logger.info("hello")
+
+    lines = capture.getvalue().splitlines()
+    assert len(lines) == 1
+    assert "hello" in lines[0]
 
 
 def test_manager_summary_counts_task_results():

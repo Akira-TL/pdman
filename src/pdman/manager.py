@@ -321,7 +321,7 @@ class Manager:
         """重新配置日志处理器（仅在日志相关配置变更时调用）"""
         self._logger.remove()
         self._logger.add(
-            lambda msg: self._console.print(Text.from_ansi(str(msg)), end="\n"),
+            lambda msg: self._console.print(Text.from_ansi(str(msg).rstrip("\r\n")), end="\n"),
             level="DEBUG" if self.debug else "INFO",
             diagnose=True,
             colorize=True,

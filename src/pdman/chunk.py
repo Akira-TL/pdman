@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 
 STREAM_CHUNK_SIZE = 100 * 1024
+RANGE_RETRYABLE_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 
 
 class Chunk:
@@ -160,6 +161,7 @@ class Chunk:
     async def download(self):
         assert self.end is not None or self.size >= 0
         self._ensure_chunk_parent_dir()
+        last_retryable_http_status = None
         file_mode = "ab" if os.path.exists(self.chunk_path) else "wb"
         async with (
             self.parent._build_client_session() as session,
@@ -196,6 +198,16 @@ class Chunk:
                                         )
                                         continue
                                 else:
+                                    if response.status in RANGE_RETRYABLE_HTTP_STATUS_CODES:
+                                        last_retryable_http_status = response.status
+                                        self.parent._logger.debug(
+                                            f"range HTTP {response.status} downloading chunk {self}, retrying..."
+                                        )
+                                        await asyncio.sleep(
+                                            self.parent.parent.retry_wait
+                                            + random.random() * 5
+                                        )
+                                        break
                                     raise RuntimeError(f"range HTTP {response.status}")
                     except aiohttp.client_exceptions.ClientPayloadError:
                         await asyncio.sleep(
@@ -243,5 +255,11 @@ class Chunk:
                     self.parent._logger.debug(f"retrying download chunk: {self}")
                 else:
                     self.parent._logger.debug(f"completed download chunk: {self}")
+        if (
+            self._needs_download()
+            and self.size <= 0
+            and last_retryable_http_status is not None
+        ):
+            raise RuntimeError(f"range HTTP {last_retryable_http_status}")
         await self._split_incomplete()
         return self

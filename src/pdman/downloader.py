@@ -230,7 +230,9 @@ class Downloader:
             self.log_path = os.path.join(self.filepath, f".pdman.{sha}.log")
         self._logger.remove()
         self._logger.add(
-            lambda msg: self.parent._console.print(Text.from_ansi(str(msg)), end="\n"),
+            lambda msg: self.parent._console.print(
+                Text.from_ansi(str(msg).rstrip("\r\n")), end="\n"
+            ),
             level="DEBUG" if self.parent.debug else "INFO",
             diagnose=True,
             colorize=True,
@@ -1654,6 +1656,7 @@ class Downloader:
                             task.cancel()
                     if tasks:
                         await asyncio.gather(*tasks, return_exceptions=True)
+                    await self._write_static_resume_metadata()
                     raise exc
                 d.result()
             await self._write_static_resume_metadata()
