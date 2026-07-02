@@ -65,6 +65,11 @@ class Chunk:
     def _needs_download(self) -> bool:
         return self.end is None or self.size < self.end - self.start + 1
 
+    def _ensure_chunk_parent_dir(self) -> None:
+        parent_dir = os.path.dirname(self.chunk_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+
     def _apply_range_header(self, headers: dict):
         if self.end is not None:
             if self.start + self.size <= self.end:
@@ -148,6 +153,7 @@ class Chunk:
 
     async def download(self):
         assert self.end is not None or self.size >= 0
+        self._ensure_chunk_parent_dir()
         file_mode = "ab" if os.path.exists(self.chunk_path) else "wb"
         async with (
             self.parent._build_client_session() as session,
