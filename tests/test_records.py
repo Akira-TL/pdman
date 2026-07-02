@@ -9,6 +9,7 @@ from pdman.records import (
     metadata_locator,
     query_records,
     record_summary,
+    records_doctor_exit_code,
     records_doctor_payload,
     records_metadata_payload,
     records_payload,
@@ -415,6 +416,24 @@ def test_records_doctor_payload_reports_history_and_metadata_health(tmp_path):
         "run_id_missing",
         "url_missing",
     ]
+
+
+def test_records_doctor_exit_code_honors_fail_on_thresholds(tmp_path):
+    write_history(
+        tmp_path,
+        [
+            {
+                "task_id": "task-1",
+                "status": "completed",
+            }
+        ],
+    )
+    payload = records_doctor_payload(str(tmp_path))
+
+    assert payload["status"] == "warning"
+    assert records_doctor_exit_code(payload, "never") == 0
+    assert records_doctor_exit_code(payload, "warning") == 1
+    assert records_doctor_exit_code(payload, "error") == 0
 
 
 def test_records_doctor_payload_ok_for_empty_history(tmp_path):

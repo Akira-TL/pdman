@@ -44,6 +44,7 @@ from .records import (
     format_records_metadata,
     format_records_schema,
     query_records,
+    records_doctor_exit_code,
     records_doctor_payload,
     records_metadata_payload,
     records_payload,
@@ -179,20 +180,26 @@ def handle_records_list_command(argv=None) -> int:
 def handle_records_doctor_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman records doctor")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--fail-on",
+        choices=("never", "warning", "error"),
+        default="never",
+    )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--json", action="store_true")
     output_group.add_argument("--jsonl", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
     payload = records_doctor_payload(args.cache_dir, limit=args.limit)
+    exit_code = records_doctor_exit_code(payload, args.fail_on)
     if args.json:
         print_json(payload)
-        return 0
+        return exit_code
     if args.jsonl:
         print_jsonl(payload["issues"])
-        return 0
+        return exit_code
     print(format_records_doctor(payload))
-    return 0
+    return exit_code
 
 
 def handle_records_schema_command(argv=None) -> int:

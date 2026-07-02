@@ -855,9 +855,12 @@ pdman records doctor
 pdman records doctor --json
 pdman records doctor --jsonl
 pdman records doctor --limit 100 --json
+pdman records doctor --fail-on warning
 ```
 
 `records doctor` 只读 history records，输出 `records_checked`、`status_counts`、`metadata_state_counts` 和结构化 `issues`。当前 issue code 包含 `invalid_status`、`run_id_missing`、`task_id_missing`、`url_missing`。它只定位 records 层健康状况，不修复历史、不迁移 schema、不执行 debug、不读取完整 metadata。
+
+v0.8.8 起，`records doctor` 支持 exit policy：`--fail-on never|warning|error`。默认 `never` 永远按检查命令成功返回 0；`warning` 在 doctor 状态为 warning 或 error 时返回 1；`error` 只在状态为 error 时返回 1。该选项只影响 CLI exit code，不改变 JSON payload。
 
 Records 与 history/run 的边界：
 
@@ -867,7 +870,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.7 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.8 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

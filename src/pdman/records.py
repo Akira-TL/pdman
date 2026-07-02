@@ -218,6 +218,17 @@ def records_doctor_payload(
     }
 
 
+def records_doctor_exit_code(payload: dict[str, Any], fail_on: str = "never") -> int:
+    if fail_on == "never":
+        return 0
+    status = payload.get("status")
+    if fail_on == "warning" and status in {"warning", "error"}:
+        return 1
+    if fail_on == "error" and status == "error":
+        return 1
+    return 0
+
+
 def format_records_doctor(payload: dict[str, Any]) -> str:
     lines = [
         "Records doctor:",
@@ -295,6 +306,7 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
             "outputs": ["readable", "json", "jsonl"],
             "filters": {
                 "limit": "recent_count; zero means unlimited",
+                "fail_on": "never|warning|error; controls CLI exit code only",
             },
             "json_shape": {
                 "schema_version": "int",
@@ -704,6 +716,7 @@ __all__ = [
     "metadata_locator",
     "query_records",
     "record_summary",
+    "records_doctor_exit_code",
     "records_doctor_payload",
     "records_metadata_payload",
     "records_payload",

@@ -273,6 +273,61 @@ def test_cli_records_doctor_jsonl_outputs_issues(tmp_path, capsys):
     ]
 
 
+def test_cli_records_doctor_fail_on_warning_returns_one(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "task_id": "task-1",
+                "status": "failed",
+            }
+        ],
+    )
+
+    exit_code = cli.main(
+        [
+            "records",
+            "doctor",
+            "--fail-on",
+            "warning",
+            "--cache-dir",
+            str(tmp_path),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "status: warning" in output
+
+
+def test_cli_records_doctor_fail_on_error_ignores_warnings(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "task_id": "task-1",
+                "status": "failed",
+            }
+        ],
+    )
+
+    exit_code = cli.main(
+        [
+            "records",
+            "doctor",
+            "--fail-on",
+            "error",
+            "--json",
+            "--cache-dir",
+            str(tmp_path),
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["status"] == "warning"
+
+
 def test_cli_records_doctor_readable_outputs_summary(tmp_path, capsys):
     exit_code = cli.main(["records", "doctor", "--cache-dir", str(tmp_path)])
 
