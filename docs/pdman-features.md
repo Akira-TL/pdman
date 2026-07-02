@@ -865,6 +865,8 @@ v0.8.8 起，`records doctor` 支持 exit policy：`--fail-on never|warning|erro
 
 v0.8.9 起，`records doctor` 支持 repeatable issue filters：`--severity info|warning|error` 和 `--code ISSUE_CODE`。过滤会影响输出的 `issues`、`issue_count` 和 doctor `status`，也会影响 `--fail-on` 判断；`total_issue_count` 保留过滤前的问题总数，便于 agent 判断是否只是被过滤隐藏。
 
+v0.8.10 起，`records doctor` 的 issue payload 增加 `impact` 和 `suggested_action`。这两个字段只提供诊断解释与下一步建议，不会自动修改 history，不会修复 metadata，不会触发 queue 或 debug command。
+
 Records 与 history/run 的边界：
 
 | Surface | 定位 |
@@ -873,7 +875,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.9 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.10 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

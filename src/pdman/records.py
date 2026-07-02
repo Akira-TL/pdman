@@ -125,6 +125,36 @@ def query_records(
     return _apply_limit(records, limit)
 
 
+_DOCTOR_ISSUE_GUIDANCE = {
+    "invalid_status": {
+        "impact": "Records filters and health summaries cannot classify this task reliably.",
+        "suggested_action": "Inspect the source history record and confirm whether the status should be completed, skipped, or failed.",
+    },
+    "run_id_missing": {
+        "impact": "The record cannot be traced back to a stable run identity.",
+        "suggested_action": "Use surrounding history context to identify the original run before relying on run-scoped records queries.",
+    },
+    "task_id_missing": {
+        "impact": "The record cannot be addressed by records show or task-scoped agent workflows.",
+        "suggested_action": "Inspect the source history record before using task-scoped records commands.",
+    },
+    "url_missing": {
+        "impact": "Metadata locator and debug suggestions cannot be derived for this record.",
+        "suggested_action": "Use target path or surrounding history context to identify the original URL before metadata inspection.",
+    },
+}
+
+
+def _doctor_issue_guidance(code: str) -> dict[str, str]:
+    return _DOCTOR_ISSUE_GUIDANCE.get(
+        code,
+        {
+            "impact": "The records layer cannot fully interpret this history record.",
+            "suggested_action": "Inspect the source history record before relying on automated records workflows.",
+        },
+    )
+
+
 def _doctor_issue(
     record: dict[str, Any],
     *,
@@ -132,10 +162,13 @@ def _doctor_issue(
     severity: str,
     message: str,
 ) -> dict[str, Any]:
+    guidance = _doctor_issue_guidance(code)
     return {
         "code": code,
         "severity": severity,
         "message": message,
+        "impact": guidance["impact"],
+        "suggested_action": guidance["suggested_action"],
         "run_id": record.get("run_id"),
         "task_id": record.get("task_id"),
         "url": record.get("url"),
@@ -383,6 +416,8 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
                 "code",
                 "severity",
                 "message",
+                "impact",
+                "suggested_action",
                 "run_id",
                 "task_id",
                 "url",

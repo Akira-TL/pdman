@@ -416,6 +416,12 @@ def test_records_doctor_payload_reports_history_and_metadata_health(tmp_path):
         "run_id_missing",
         "url_missing",
     ]
+    assert payload["issues"][0]["impact"] == (
+        "Records filters and health summaries cannot classify this task reliably."
+    )
+    assert payload["issues"][0]["suggested_action"] == (
+        "Inspect the source history record and confirm whether the status should be completed, skipped, or failed."
+    )
 
 
 def test_records_doctor_payload_filters_issues_by_severity_and_code(tmp_path):
@@ -509,6 +515,17 @@ def test_records_schema_payload_describes_all_records_surfaces():
     }
     assert payload["commands"]["metadata"]["selector_mode"] == "exactly_one_required"
     assert payload["commands"]["doctor"]["json_shape"]["issues"] == "list[doctor_issue]"
+    assert payload["shared_payloads"]["doctor_issue"] == [
+        "code",
+        "severity",
+        "message",
+        "impact",
+        "suggested_action",
+        "run_id",
+        "task_id",
+        "url",
+        "target_path",
+    ]
     assert payload["commands"]["show"]["json_shape"]["suggested_debug"] == "list[debug_action]"
     assert payload["shared_payloads"]["metadata_locator"] == {
         "resume": ["path", "exists", "source", "status", "reason"],

@@ -299,7 +299,14 @@ def test_cli_records_doctor_jsonl_filters_issues(tmp_path, capsys):
 
     lines = capsys.readouterr().out.splitlines()
     assert exit_code == 0
-    assert [json.loads(line)["code"] for line in lines] == ["invalid_status"]
+    issues = [json.loads(line) for line in lines]
+    assert [issue["code"] for issue in issues] == ["invalid_status"]
+    assert issues[0]["impact"] == (
+        "Records filters and health summaries cannot classify this task reliably."
+    )
+    assert issues[0]["suggested_action"] == (
+        "Inspect the source history record and confirm whether the status should be completed, skipped, or failed."
+    )
 
 
 def test_cli_records_doctor_filtered_status_controls_fail_on(tmp_path, capsys):

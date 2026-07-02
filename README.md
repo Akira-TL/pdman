@@ -375,6 +375,8 @@ v0.8.8 起，`records doctor` 支持 `--fail-on never|warning|error`。默认 `n
 
 v0.8.9 起，`records doctor` 支持 repeatable `--severity info|warning|error` 和 `--code ISSUE_CODE` 过滤 issues。过滤会影响输出的 `issues`、`issue_count` 和 doctor `status`，但会保留 `total_issue_count` 表示过滤前问题总数。
 
+v0.8.10 起，`records doctor` 的每个 issue 增加 `impact` 和 `suggested_action`，让 agent 和人类能直接理解问题影响与下一步建议。该建议仍然只是诊断提示，不会自动修复 history、metadata 或 queue。
+
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 
 ### 本地队列命令
