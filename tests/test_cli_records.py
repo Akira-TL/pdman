@@ -224,6 +224,65 @@ def test_cli_records_list_filters_status_url_target_and_run_id(tmp_path, capsys)
     assert payload["records"][0]["target_path"] == "/downloads/b.bin"
 
 
+def test_cli_records_doctor_json_outputs_health_report(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "task_id": "task-1",
+                "status": "failed",
+            }
+        ],
+    )
+
+    exit_code = cli.main(
+        ["records", "doctor", "--json", "--cache-dir", str(tmp_path)]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["status"] == "warning"
+    assert payload["records_checked"] == 1
+    assert [issue["code"] for issue in payload["issues"]] == [
+        "run_id_missing",
+        "url_missing",
+    ]
+
+
+def test_cli_records_doctor_jsonl_outputs_issues(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "task_id": "task-1",
+                "status": "unknown",
+            }
+        ],
+    )
+
+    exit_code = cli.main(
+        ["records", "doctor", "--jsonl", "--cache-dir", str(tmp_path)]
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 0
+    assert [json.loads(line)["code"] for line in lines] == [
+        "invalid_status",
+        "url_missing",
+    ]
+
+
+def test_cli_records_doctor_readable_outputs_summary(tmp_path, capsys):
+    exit_code = cli.main(["records", "doctor", "--cache-dir", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Records doctor:" in output
+    assert "status: ok" in output
+    assert "issues: none" in output
+
+
 def test_cli_records_schema_json_outputs_contract(capsys):
     exit_code = cli.main(["records", "schema", "--surface", "show", "--json"])
 
@@ -241,6 +300,7 @@ def test_cli_records_schema_readable_outputs_summary(capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Records schema:" in output
+    assert "doctor: introduced=0.8.7" in output
     assert "list: introduced=0.8.0" in output
     assert "metadata: introduced=0.8.2" in output
     assert "show: introduced=0.8.3" in output
@@ -525,4 +585,4 @@ def test_cli_records_requires_subcommand(capsys):
 
     output = capsys.readouterr().out
     assert exit_code == 1
-    assert "Records command required: list, metadata, schema, or show" in output
+    assert "Records command required: doctor, list, metadata, schema, or show" in output

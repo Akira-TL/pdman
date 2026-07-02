@@ -3,11 +3,13 @@ import hashlib
 from pdman.records import (
     format_record_show,
     format_records,
+    format_records_doctor,
     format_records_metadata,
     format_records_schema,
     metadata_locator,
     query_records,
     record_summary,
+    records_doctor_payload,
     records_metadata_payload,
     records_payload,
     records_schema_payload,
@@ -370,17 +372,80 @@ def test_format_records_metadata_readable_summary(tmp_path):
     assert "dynamic_ranges: missing" in output
 
 
+def test_records_doctor_payload_reports_history_and_metadata_health(tmp_path):
+    url = "https://example.com/file.bin"
+    url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
+    metadata_dir = tmp_path / "metadata" / url_hash
+    metadata_dir.mkdir(parents=True)
+    (metadata_dir / "resume-metadata.json").write_text("not json", encoding="utf-8")
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "task_id": "task-1",
+                "url": url,
+                "status": "completed",
+            },
+            {
+                "task_id": "task-2",
+                "target_path": "/downloads/missing-url.bin",
+                "status": "unknown",
+            },
+        ],
+    )
+
+    payload = records_doctor_payload(str(tmp_path))
+
+    assert payload["schema_version"] == 1
+    assert payload["status"] == "warning"
+    assert payload["records_checked"] == 2
+    assert payload["status_counts"] == {
+        "completed": 1,
+        "skipped": 0,
+        "failed": 0,
+    }
+    assert payload["metadata_state_counts"] == {
+        "available": 1,
+        "missing": 0,
+        "unavailable": 1,
+    }
+    assert [issue["code"] for issue in payload["issues"]] == [
+        "invalid_status",
+        "run_id_missing",
+        "url_missing",
+    ]
+
+
+def test_records_doctor_payload_ok_for_empty_history(tmp_path):
+    payload = records_doctor_payload(str(tmp_path))
+
+    assert payload["status"] == "ok"
+    assert payload["records_checked"] == 0
+    assert payload["issues"] == []
+
+
+def test_format_records_doctor_readable_summary(tmp_path):
+    output = format_records_doctor(records_doctor_payload(str(tmp_path)))
+
+    assert "Records doctor:" in output
+    assert "status: ok" in output
+    assert "records_checked: 0" in output
+    assert "issues: none" in output
+
+
 def test_records_schema_payload_describes_all_records_surfaces():
     payload = records_schema_payload()
 
     assert payload["schema_version"] == 1
     assert payload["surface"] == "all"
-    assert set(payload["commands"]) == {"list", "metadata", "show"}
+    assert set(payload["commands"]) == {"doctor", "list", "metadata", "show"}
     assert payload["commands"]["list"]["json_shape"] == {
         "records": "list[record_summary]",
         "count": "int",
     }
     assert payload["commands"]["metadata"]["selector_mode"] == "exactly_one_required"
+    assert payload["commands"]["doctor"]["json_shape"]["issues"] == "list[doctor_issue]"
     assert payload["commands"]["show"]["json_shape"]["suggested_debug"] == "list[debug_action]"
     assert payload["shared_payloads"]["metadata_locator"] == {
         "resume": ["path", "exists", "source", "status", "reason"],
@@ -403,7 +468,7 @@ def test_format_records_schema_readable_summary():
     assert "Records schema:" in output
     assert "surface: metadata" in output
     assert "metadata: introduced=0.8.2" in output
-    assert "shared_payloads: metadata_locator, debug_action" in output
+    assert "shared_payloads: metadata_locator, debug_action, doctor_issue" in output
 
 
 def test_suggested_debug_actions_include_argv_and_shell_command(tmp_path):

@@ -40,9 +40,11 @@ from .queue import retry_failed_candidates, start_queue_records, validate_queue
 from .records import (
     format_record_show,
     format_records,
+    format_records_doctor,
     format_records_metadata,
     format_records_schema,
     query_records,
+    records_doctor_payload,
     records_metadata_payload,
     records_payload,
     records_schema_payload,
@@ -174,11 +176,30 @@ def handle_records_list_command(argv=None) -> int:
     return 0
 
 
+def handle_records_doctor_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman records doctor")
+    parser.add_argument("--limit", type=int, default=0)
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    payload = records_doctor_payload(args.cache_dir, limit=args.limit)
+    if args.json:
+        print_json(payload)
+        return 0
+    if args.jsonl:
+        print_jsonl(payload["issues"])
+        return 0
+    print(format_records_doctor(payload))
+    return 0
+
+
 def handle_records_schema_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman records schema")
     parser.add_argument(
         "--surface",
-        choices=("all", "list", "metadata", "show"),
+        choices=("all", "doctor", "list", "metadata", "show"),
         default="all",
     )
     parser.add_argument("--json", action="store_true")
@@ -254,9 +275,11 @@ def handle_records_metadata_command(argv=None) -> int:
 def handle_records_command(argv=None) -> int:
     argv = list(argv or [])
     if not argv:
-        print("Records command required: list, metadata, schema, or show")
+        print("Records command required: doctor, list, metadata, schema, or show")
         return 1
     command, rest = argv[0], argv[1:]
+    if command == "doctor":
+        return handle_records_doctor_command(rest)
     if command == "list":
         return handle_records_list_command(rest)
     if command == "metadata":

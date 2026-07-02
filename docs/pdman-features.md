@@ -663,6 +663,9 @@ pdman records metadata --url https://example.com/file.bin --json
 pdman records metadata --run-id <run-id> --jsonl
 pdman records show --run-id <run-id> --task-id <task-id>
 pdman records show --run-id <run-id> --task-id <task-id> --json
+pdman records doctor
+pdman records doctor --json
+pdman records doctor --jsonl
 pdman records schema
 pdman records schema --surface show --json
 ```
@@ -845,6 +848,17 @@ v0.8.6 稳定 records diagnostics 边界：
 - `records metadata` 对匹配到但缺失 URL 的 record 输出 `skipped` 和 `skipped_count`。
 - `records show --json` 找不到 task 时输出结构化 `{error: {code, message, run_id, task_id}}`，readable 输出保持原来的简短错误文本。
 
+v0.8.7 新增 records doctor：
+
+```bash
+pdman records doctor
+pdman records doctor --json
+pdman records doctor --jsonl
+pdman records doctor --limit 100 --json
+```
+
+`records doctor` 只读 history records，输出 `records_checked`、`status_counts`、`metadata_state_counts` 和结构化 `issues`。当前 issue code 包含 `invalid_status`、`run_id_missing`、`task_id_missing`、`url_missing`。它只定位 records 层健康状况，不修复历史、不迁移 schema、不执行 debug、不读取完整 metadata。
+
 Records 与 history/run 的边界：
 
 | Surface | 定位 |
@@ -853,7 +867,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.6 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.7 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

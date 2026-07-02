@@ -125,6 +125,130 @@ def query_records(
     return _apply_limit(records, limit)
 
 
+def _doctor_issue(
+    record: dict[str, Any],
+    *,
+    code: str,
+    severity: str,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "severity": severity,
+        "message": message,
+        "run_id": record.get("run_id"),
+        "task_id": record.get("task_id"),
+        "url": record.get("url"),
+        "target_path": _record_target(record),
+    }
+
+
+def _metadata_state_for_record(cache_dir: str | None, record: dict[str, Any]) -> str:
+    url = record.get("url")
+    if not isinstance(url, str) or not url:
+        return "unavailable"
+    locator = metadata_locator(cache_dir, url)
+    if any(item.get("exists") for item in locator.values()):
+        return "available"
+    return "missing"
+
+
+def records_doctor_payload(
+    cache_dir: str | None = None,
+    *,
+    limit: int | None = 0,
+) -> dict[str, Any]:
+    records = query_records(cache_dir, limit=limit)
+    status_counts = {status: 0 for status in VALID_STATUSES}
+    metadata_state_counts = {"available": 0, "missing": 0, "unavailable": 0}
+    issues: list[dict[str, Any]] = []
+    for record in records:
+        status = record.get("status")
+        if status in status_counts:
+            status_counts[status] += 1
+        else:
+            issues.append(
+                _doctor_issue(
+                    record,
+                    code="invalid_status",
+                    severity="warning",
+                    message="Record status is missing or not supported by the records schema.",
+                )
+            )
+        if not record.get("run_id"):
+            issues.append(
+                _doctor_issue(
+                    record,
+                    code="run_id_missing",
+                    severity="warning",
+                    message="Record is missing run_id.",
+                )
+            )
+        if not record.get("task_id"):
+            issues.append(
+                _doctor_issue(
+                    record,
+                    code="task_id_missing",
+                    severity="warning",
+                    message="Record is missing task_id.",
+                )
+            )
+        if not isinstance(record.get("url"), str) or not record.get("url"):
+            issues.append(
+                _doctor_issue(
+                    record,
+                    code="url_missing",
+                    severity="info",
+                    message="Record is missing url, so metadata locator cannot be derived.",
+                )
+            )
+        metadata_state_counts[_metadata_state_for_record(cache_dir, record)] += 1
+    error_count = sum(1 for issue in issues if issue.get("severity") == "error")
+    warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
+    return {
+        "schema_version": 1,
+        "status": "error" if error_count else "warning" if warning_count else "ok",
+        "records_checked": len(records),
+        "issue_count": len(issues),
+        "warning_count": warning_count,
+        "error_count": error_count,
+        "status_counts": status_counts,
+        "metadata_state_counts": metadata_state_counts,
+        "issues": issues,
+    }
+
+
+def format_records_doctor(payload: dict[str, Any]) -> str:
+    lines = [
+        "Records doctor:",
+        f"  status: {payload.get('status')}",
+        f"  records_checked: {payload.get('records_checked')}",
+        f"  issue_count: {payload.get('issue_count')}",
+    ]
+    status_counts = payload.get("status_counts") or {}
+    metadata_counts = payload.get("metadata_state_counts") or {}
+    lines.append(
+        "  status_counts: "
+        + ", ".join(f"{key}={value}" for key, value in status_counts.items())
+    )
+    lines.append(
+        "  metadata_state_counts: "
+        + ", ".join(f"{key}={value}" for key, value in metadata_counts.items())
+    )
+    issues = payload.get("issues") or []
+    if not issues:
+        lines.append("  issues: none")
+        return "\n".join(lines)
+    lines.append("  issues:")
+    for issue in issues:
+        identity = f"{issue.get('run_id') or '-'}/{issue.get('task_id') or '-'}"
+        lines.append(
+            f"    {issue.get('severity')} {issue.get('code')} {identity}: "
+            f"{issue.get('message')}"
+        )
+    return "\n".join(lines)
+
+
 def records_schema_payload(surface: str = "all") -> dict[str, Any]:
     commands = {
         "list": {
@@ -166,6 +290,22 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
                 "metadata",
             ],
         },
+        "doctor": {
+            "introduced_in": "0.8.7",
+            "outputs": ["readable", "json", "jsonl"],
+            "filters": {
+                "limit": "recent_count; zero means unlimited",
+            },
+            "json_shape": {
+                "schema_version": "int",
+                "status": "ok|warning|error",
+                "records_checked": "int",
+                "issue_count": "int",
+                "status_counts": "dict[str,int]",
+                "metadata_state_counts": "dict[str,int]",
+                "issues": "list[doctor_issue]",
+            },
+        },
         "show": {
             "introduced_in": "0.8.3",
             "outputs": ["readable", "json"],
@@ -200,6 +340,15 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
                 "argv",
                 "command",
             ],
+            "doctor_issue": [
+                "code",
+                "severity",
+                "message",
+                "run_id",
+                "task_id",
+                "url",
+                "target_path",
+            ],
         },
         "non_goals": [
             "database_index_engine",
@@ -222,7 +371,7 @@ def format_records_schema(payload: dict[str, Any]) -> str:
         outputs = ", ".join(contract.get("outputs") or [])
         introduced = contract.get("introduced_in") or "-"
         lines.append(f"    {name}: introduced={introduced} outputs={outputs}")
-    lines.append("  shared_payloads: metadata_locator, debug_action")
+    lines.append("  shared_payloads: metadata_locator, debug_action, doctor_issue")
     non_goals = ", ".join(payload.get("non_goals") or [])
     lines.append(f"  non_goals: {non_goals}")
     return "\n".join(lines)
@@ -549,11 +698,13 @@ def format_records(records: list[dict[str, Any]]) -> str:
 __all__ = [
     "format_record_show",
     "format_records",
+    "format_records_doctor",
     "format_records_metadata",
     "format_records_schema",
     "metadata_locator",
     "query_records",
     "record_summary",
+    "records_doctor_payload",
     "records_metadata_payload",
     "records_payload",
     "records_schema_payload",
