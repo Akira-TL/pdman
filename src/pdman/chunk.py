@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 
 STREAM_CHUNK_SIZE = 100 * 1024
+RANGE_RETRYABLE_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 
 
 class Chunk:
@@ -64,6 +65,11 @@ class Chunk:
 
     def _needs_download(self) -> bool:
         return self.end is None or self.size < self.end - self.start + 1
+
+    def _ensure_chunk_parent_dir(self) -> None:
+        parent_dir = os.path.dirname(self.chunk_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
 
     def _apply_range_header(self, headers: dict):
         if self.end is not None:
@@ -127,6 +133,11 @@ class Chunk:
         if self.next is not None and getattr(self.next, 'forward', None) is self:
             return
         if self.size != self.end - self.start + 1:
+            if self.size <= 0:
+                self.parent._logger.debug(
+                    f"Chunk made no progress, leaving unchanged for retry: {self}"
+                )
+                return
             self.parent._logger.debug(
                 f"Chunk not fully downloaded, splitting chunk: {self}"
             )
@@ -145,9 +156,12 @@ class Chunk:
                 )
                 self.end = new_start - 1
                 self.next = new_chunk
+            await self.parent._write_static_resume_metadata()
 
     async def download(self):
         assert self.end is not None or self.size >= 0
+        self._ensure_chunk_parent_dir()
+        last_retryable_http_status = None
         file_mode = "ab" if os.path.exists(self.chunk_path) else "wb"
         async with (
             self.parent._build_client_session() as session,
@@ -184,8 +198,25 @@ class Chunk:
                                         )
                                         continue
                                 else:
+                                    if response.status in RANGE_RETRYABLE_HTTP_STATUS_CODES:
+                                        last_retryable_http_status = response.status
+                                        self.parent._logger.debug(
+                                            f"range HTTP {response.status} downloading chunk {self}, retrying..."
+                                        )
+                                        await asyncio.sleep(
+                                            self.parent.parent.retry_wait
+                                            + random.random() * 5
+                                        )
+                                        break
                                     raise RuntimeError(f"range HTTP {response.status}")
                     except aiohttp.client_exceptions.ClientPayloadError:
+                        await asyncio.sleep(
+                            self.parent.parent.retry_wait + random.random() * 5
+                        )
+                    except aiohttp.ClientConnectionError as e:
+                        self.parent._logger.debug(
+                            f"Connection error downloading chunk {self}: {e}, retrying..."
+                        )
                         await asyncio.sleep(
                             self.parent.parent.retry_wait + random.random() * 5
                         )
@@ -224,5 +255,11 @@ class Chunk:
                     self.parent._logger.debug(f"retrying download chunk: {self}")
                 else:
                     self.parent._logger.debug(f"completed download chunk: {self}")
+        if (
+            self._needs_download()
+            and self.size <= 0
+            and last_retryable_http_status is not None
+        ):
+            raise RuntimeError(f"range HTTP {last_retryable_http_status}")
         await self._split_incomplete()
         return self

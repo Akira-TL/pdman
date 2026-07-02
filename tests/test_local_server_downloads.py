@@ -625,6 +625,30 @@ def test_static_segment_download_records_range_static_for_range_http_failure(tmp
 
 
 
+def test_static_segment_download_recovers_retryable_range_http_status(tmp_path):
+    FLAKY_COUNTS.clear()
+    with LocalDownloadServer() as server:
+        manager = Manager(
+            max_downloads=1,
+            max_concurrent_downloads=2,
+            min_split_size="1K",
+            segment_mode="static",
+            retry=2,
+            retry_wait=0,
+            log_path=None,
+        )
+        manager.append(
+            server.url("/flaky-range.bin"),
+            file_name="static-flaky-range.bin",
+            dir_path=str(tmp_path),
+        )
+        asyncio.run(manager.download())
+
+        assert (tmp_path / "static-flaky-range.bin").read_bytes() == PAYLOAD
+        assert manager.results[0].status == TaskStatus.COMPLETED
+        assert manager.exit_code == 0
+
+
 def test_dynamic_segment_download_recovers_flaky_ranges(tmp_path):
     FLAKY_COUNTS.clear()
     with LocalDownloadServer() as server:

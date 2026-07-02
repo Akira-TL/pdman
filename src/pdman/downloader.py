@@ -188,6 +188,7 @@ class Downloader:
         self.chunk_root: Chunk | None = None
         self.range_allocator: RangeAllocator | None = None
         self.downloaded_bytes: int = 0
+        self.task = None
         self.lock = asyncio.Lock()
         self.metadata_lock = asyncio.Lock()
         self.resume_metadata_lock = asyncio.Lock()
@@ -229,7 +230,9 @@ class Downloader:
             self.log_path = os.path.join(self.filepath, f".pdman.{sha}.log")
         self._logger.remove()
         self._logger.add(
-            lambda msg: self.parent._console.print(Text.from_ansi(str(msg)), end="\n"),
+            lambda msg: self.parent._console.print(
+                Text.from_ansi(str(msg).rstrip("\r\n")), end="\n"
+            ),
             level="DEBUG" if self.parent.debug else "INFO",
             diagnose=True,
             colorize=True,
@@ -322,6 +325,7 @@ class Downloader:
         if status != TaskStatus.FAILED:
             self._clear_network_error()
         self.set_status(status, reason, reason_code, error)
+        self._stop_progress_task()
         self.result = TaskResult(
             url=self.url,
             filename=self.filename,
@@ -915,23 +919,28 @@ class Downloader:
                 if gap > max_gap:
                     max_gap = gap
                     target_chunk = chunk
-            if target_chunk is None or max_gap <= self.parent.min_split_size:
+            if target_chunk is None or max_gap < self.parent.min_split_size * 2:
                 return None
-            new_start = (
-                target_chunk.start
-                + target_chunk.size
-                + (target_chunk.next.start if target_chunk.next else target_chunk.end)
-            ) // 2
+            remaining_start = target_chunk.start + target_chunk.size
+            remaining_end = (
+                target_chunk.next.start - 1
+                if target_chunk.next
+                else target_chunk.end
+            )
+            new_start = remaining_start + max_gap // 2
             if new_start // 10240:
                 new_start -= new_start % 10240
+            front_remaining = new_start - remaining_start
+            back_remaining = remaining_end - new_start + 1
+            if (
+                front_remaining < self.parent.min_split_size
+                or back_remaining < self.parent.min_split_size
+            ):
+                return None
             new_chunk = Chunk(
                 self,
                 new_start,
-                (
-                    target_chunk.next.start - 1
-                    if target_chunk.next
-                    else target_chunk.end
-                ),
+                remaining_end,
                 os.path.join(self.pdm_tmp, f"{self.filename}.{new_start}"),
                 target_chunk,
                 next=target_chunk.next,
@@ -1012,11 +1021,9 @@ class Downloader:
                             merge_chunk = 0
                         else:
                             merge_chunk += len(data)
-        # self.parent._progress.stop_task(self.task)
-        self.parent._progress.remove_task(self.task)
-
         await asyncio.to_thread(os.replace, temp_path, dest_path)
         await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
+        self._stop_progress_task()
 
     def target_path_if_named(self) -> str | None:
         if not self.filename:
@@ -1277,6 +1284,37 @@ class Downloader:
             return None
         return self.file_size, actual_bytes
 
+    def _ensure_progress_task(
+        self,
+        description: str,
+        *,
+        total: int | None,
+        completed: int = 0,
+        dl=0,
+    ):
+        if self.task is None:
+            self.task = self.parent._progress.add_task(
+                description,
+                total=total,
+                completed=completed,
+                dl=dl,
+            )
+        else:
+            self.parent._progress.update(
+                self.task,
+                description=description,
+                total=total,
+                completed=completed,
+                dl=dl,
+            )
+        return self.task
+
+    def _stop_progress_task(self) -> None:
+        if self.task is None:
+            return
+        with suppress(KeyError, ValueError):
+            self.parent._progress.stop_task(self.task)
+
     async def _start_dynamic_download(self) -> None:
         allocator = self._build_range_allocator()
         self.range_allocator = allocator
@@ -1285,7 +1323,7 @@ class Downloader:
         workers = []
 
         async def progress_run():
-            self.task = self.parent._progress.add_task(
+            progress_task = self._ensure_progress_task(
                 f"Downloading {self.filename}",
                 total=self.file_size,
                 completed=self.downloaded_bytes,
@@ -1293,13 +1331,13 @@ class Downloader:
             )
             while self.downloaded_bytes < self.file_size:
                 self.parent._progress.update(
-                    self.task,
+                    progress_task,
                     completed=min(self.downloaded_bytes, self.file_size),
                     dl=len([worker for worker in workers if not worker.done()]),
                 )
                 await asyncio.sleep(self.parent.summary_interval)
             self.parent._progress.update(
-                self.task,
+                progress_task,
                 completed=min(self.downloaded_bytes, self.file_size),
                 dl=0,
             )
@@ -1381,9 +1419,9 @@ class Downloader:
                             merge_chunk = 0
                         else:
                             merge_chunk += len(data)
-        self.parent._progress.remove_task(self.task)
         await asyncio.to_thread(os.replace, temp_path, dest_path)
         await asyncio.to_thread(shutil.rmtree, self.pdm_tmp, True)
+        self._stop_progress_task()
 
     async def start_download(self, _iter=None):
         if _iter is None:
@@ -1398,7 +1436,6 @@ class Downloader:
                     parsed = True
                 if await self.skip_existing_named_target():
                     return self.result
-                self.task = None
                 self.set_status(TaskStatus.DOWNLOADING)
                 if self._can_use_dynamic_segments():
                     await self._start_dynamic_download()
@@ -1577,16 +1614,16 @@ class Downloader:
 
         async def progress_run():
             if self.file_size < 0:
-                self.task = self.parent._progress.add_task(
+                progress_task = self._ensure_progress_task(
                     f"Downloading {self.filename}", total=None, dl=len(tasks)
                 )
                 while not self._downloaded:
                     self.parent._progress.update(
-                        self.task, completed=self.downloaded_bytes, dl=len(tasks)
+                        progress_task, completed=self.downloaded_bytes, dl=len(tasks)
                     )
                     await asyncio.sleep(self.parent.summary_interval)
             else:
-                self.task = self.parent._progress.add_task(
+                progress_task = self._ensure_progress_task(
                     f"Downloading {self.filename}",
                     total=self.file_size,
                     completed=self.downloaded_bytes,
@@ -1597,17 +1634,15 @@ class Downloader:
                     if self.file_size <= completed:
                         break
                     self.parent._progress.update(
-                        self.task, completed=completed, dl=len(tasks)
+                        progress_task, completed=completed, dl=len(tasks)
                     )
                     await asyncio.sleep(self.parent.summary_interval)
                 self.parent._progress.update(
-                    self.task,
+                    progress_task,
                     completed=min(self.downloaded_bytes, self.file_size),
                     dl=len(tasks),
                 )
                 self.parent._logger.info(f"Completed downloading {self.filename}")
-            # self.parent._progress.stop_task(self.task)
-            # self.parent._progress.remove_task(self.task)
 
         self.progress = asyncio.create_task(progress_run())
 
@@ -1621,12 +1656,16 @@ class Downloader:
                             task.cancel()
                     if tasks:
                         await asyncio.gather(*tasks, return_exceptions=True)
+                    await self._write_static_resume_metadata()
                     raise exc
                 d.result()
+            await self._write_static_resume_metadata()
 
         # 在锁保护下收集所有初始 chunk 引用，避免并发修改链表导致迭代器异常
         async with self.lock:
-            chunks_to_start = [chunk for chunk in self.chunk_root]
+            chunks_to_start = [
+                chunk for chunk in self.chunk_root if chunk._needs_download()
+            ]
         for chunk in chunks_to_start:
             if tasks.__len__() < self.parent.max_concurrent_downloads:
                 self.parent._logger.debug(
@@ -1665,6 +1704,7 @@ class Downloader:
             tasks.append(asyncio.create_task(new_chunk.download()))
         try:
             await asyncio.gather(*tasks)
+            await self._write_static_resume_metadata()
             size_mismatch = self._static_downloaded_size_mismatch()
             if size_mismatch is not None:
                 expected_bytes, actual_bytes = size_mismatch

@@ -28,6 +28,62 @@ def test_header_probe_reason_contract():
     assert HEADER_PROBE_FALLBACK_REASON_CONNECTION_ERROR == "head_connection_error"
 
 
+class FakeProgress:
+    def __init__(self):
+        self.added = []
+        self.updated = []
+        self.stopped = []
+
+    def add_task(self, description, **kwargs):
+        task_id = len(self.added) + 1
+        self.added.append((task_id, description, kwargs))
+        return task_id
+
+    def update(self, task_id, **kwargs):
+        self.updated.append((task_id, kwargs))
+
+    def stop_task(self, task_id):
+        self.stopped.append(task_id)
+
+
+def test_downloader_reuses_one_progress_task_for_retries(tmp_path):
+    progress = FakeProgress()
+    parent = SimpleNamespace(_progress=progress)
+    downloader = Downloader(
+        parent,
+        "https://example.com/file.bin",
+        str(tmp_path),
+        filename="file.bin",
+    )
+
+    first_task = downloader._ensure_progress_task(
+        "Downloading file.bin", total=100, completed=0, dl=16
+    )
+    retry_task = downloader._ensure_progress_task(
+        "Downloading file.bin", total=100, completed=25, dl=15
+    )
+    downloader.record_result(
+        TaskStatus.FAILED,
+        reason="failed after retries",
+        reason_code=TaskReason.UNEXPECTED_ERROR,
+    )
+
+    assert retry_task == first_task
+    assert [item[0] for item in progress.added] == [first_task]
+    assert progress.updated == [
+        (
+            first_task,
+            {
+                "description": "Downloading file.bin",
+                "total": 100,
+                "completed": 25,
+                "dl": 15,
+            },
+        )
+    ]
+    assert progress.stopped == [first_task]
+
+
 def test_downloader_dynamic_segment_support_checks(tmp_path):
     manager = Manager(
         segment_mode="dynamic",
@@ -560,6 +616,76 @@ def test_refresh_downloaded_bytes_uses_existing_chunk_sizes(tmp_path):
 
     assert downloader.refresh_downloaded_bytes() == 65
     assert downloader.downloaded_bytes == 65
+
+
+def test_create_chunk_does_not_split_tail_below_min_split_size(tmp_path):
+    async def run_case():
+        manager = Manager(min_split_size="1M", log_path=None)
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_path / "tmp"),
+        )
+        downloader.file_size = 2 * 1024 * 1024 - 1
+        downloader.chunk_root = Chunk(
+            downloader,
+            0,
+            downloader.file_size - 1,
+            str(tmp_path / "tmp" / "file.bin.0"),
+        )
+        downloader.chunk_root.size = 0
+        writes = []
+
+        async def record_write():
+            writes.append(True)
+
+        downloader._write_static_resume_metadata = record_write
+
+        new_chunk = await downloader.create_chunk()
+
+        assert new_chunk is None
+        assert downloader.chunk_root.next is None
+        assert writes == []
+
+    asyncio.run(run_case())
+
+
+def test_create_chunk_splits_only_when_both_sides_meet_min_split_size(tmp_path):
+    async def run_case():
+        manager = Manager(min_split_size="1M", log_path=None)
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_path / "tmp"),
+        )
+        downloader.file_size = 4 * 1024 * 1024
+        downloader.chunk_root = Chunk(
+            downloader,
+            0,
+            downloader.file_size - 1,
+            str(tmp_path / "tmp" / "file.bin.0"),
+        )
+        downloader.chunk_root.size = 0
+        writes = []
+
+        async def record_write():
+            writes.append(True)
+
+        downloader._write_static_resume_metadata = record_write
+
+        new_chunk = await downloader.create_chunk()
+
+        assert new_chunk is not None
+        assert new_chunk.start >= manager.min_split_size
+        assert downloader.chunk_root.end + 1 == new_chunk.start
+        assert new_chunk.end == downloader.file_size - 1
+        assert writes == [True]
+
+    asyncio.run(run_case())
 
 
 def test_quit_if_exists_skips_named_file_before_parse_config(tmp_path):
