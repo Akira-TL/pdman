@@ -247,6 +247,19 @@ def test_cli_records_doctor_json_outputs_health_report(tmp_path, capsys):
         "run_id_missing",
         "url_missing",
     ]
+    assert [group["code"] for group in payload["issue_groups"]] == [
+        "run_id_missing",
+        "url_missing",
+    ]
+    assert payload["issue_groups"][0]["count"] == 1
+    assert payload["issue_groups"][0]["sample_records"] == [
+        {
+            "run_id": None,
+            "task_id": "task-1",
+            "url": None,
+            "target_path": None,
+        }
+    ]
 
 
 def test_cli_records_doctor_jsonl_outputs_issues(tmp_path, capsys):

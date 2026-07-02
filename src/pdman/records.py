@@ -200,6 +200,39 @@ def _filter_doctor_issues(
     return filtered
 
 
+def _doctor_issue_sample(issue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": issue.get("run_id"),
+        "task_id": issue.get("task_id"),
+        "url": issue.get("url"),
+        "target_path": issue.get("target_path"),
+    }
+
+
+def _group_doctor_issues(
+    issues: list[dict[str, Any]],
+    *,
+    sample_size: int = 3,
+) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for issue in issues:
+        code = str(issue.get("code") or "unknown")
+        if code not in groups:
+            groups[code] = {
+                "code": code,
+                "severity": issue.get("severity") or "unknown",
+                "count": 0,
+                "impact": issue.get("impact"),
+                "suggested_action": issue.get("suggested_action"),
+                "sample_records": [],
+            }
+        group = groups[code]
+        group["count"] += 1
+        if len(group["sample_records"]) < sample_size:
+            group["sample_records"].append(_doctor_issue_sample(issue))
+    return list(groups.values())
+
+
 def records_doctor_payload(
     cache_dir: str | None = None,
     *,
@@ -254,6 +287,7 @@ def records_doctor_payload(
         metadata_state_counts[_metadata_state_for_record(cache_dir, record)] += 1
     total_issue_count = len(issues)
     issues = _filter_doctor_issues(issues, severities=severities, codes=codes)
+    issue_groups = _group_doctor_issues(issues)
     error_count = sum(1 for issue in issues if issue.get("severity") == "error")
     warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
     return {
@@ -270,6 +304,7 @@ def records_doctor_payload(
         "error_count": error_count,
         "status_counts": status_counts,
         "metadata_state_counts": metadata_state_counts,
+        "issue_groups": issue_groups,
         "issues": issues,
     }
 
@@ -302,6 +337,13 @@ def format_records_doctor(payload: dict[str, Any]) -> str:
         "  metadata_state_counts: "
         + ", ".join(f"{key}={value}" for key, value in metadata_counts.items())
     )
+    groups = payload.get("issue_groups") or []
+    if groups:
+        lines.append("  issue_groups:")
+        for group in groups:
+            lines.append(
+                f"    {group.get('severity')} {group.get('code')} count={group.get('count')}"
+            )
     issues = payload.get("issues") or []
     if not issues:
         lines.append("  issues: none")
@@ -375,6 +417,7 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
                 "filters": "active issue filters",
                 "status_counts": "dict[str,int]",
                 "metadata_state_counts": "dict[str,int]",
+                "issue_groups": "list[doctor_issue_group]",
                 "issues": "list[doctor_issue]",
             },
         },
@@ -422,6 +465,14 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
                 "task_id",
                 "url",
                 "target_path",
+            ],
+            "doctor_issue_group": [
+                "code",
+                "severity",
+                "count",
+                "impact",
+                "suggested_action",
+                "sample_records",
             ],
         },
         "non_goals": [

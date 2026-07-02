@@ -422,6 +422,20 @@ def test_records_doctor_payload_reports_history_and_metadata_health(tmp_path):
     assert payload["issues"][0]["suggested_action"] == (
         "Inspect the source history record and confirm whether the status should be completed, skipped, or failed."
     )
+    assert [group["code"] for group in payload["issue_groups"]] == [
+        "invalid_status",
+        "run_id_missing",
+        "url_missing",
+    ]
+    assert payload["issue_groups"][0]["count"] == 1
+    assert payload["issue_groups"][0]["sample_records"] == [
+        {
+            "run_id": None,
+            "task_id": "task-2",
+            "url": None,
+            "target_path": "/downloads/missing-url.bin",
+        }
+    ]
 
 
 def test_records_doctor_payload_filters_issues_by_severity_and_code(tmp_path):
@@ -448,6 +462,8 @@ def test_records_doctor_payload_filters_issues_by_severity_and_code(tmp_path):
         "codes": ["invalid_status"],
     }
     assert [issue["code"] for issue in payload["issues"]] == ["invalid_status"]
+    assert [group["code"] for group in payload["issue_groups"]] == ["invalid_status"]
+    assert payload["issue_groups"][0]["count"] == 1
 
 
 def test_records_doctor_payload_filter_can_make_status_ok(tmp_path):
@@ -492,6 +508,7 @@ def test_records_doctor_payload_ok_for_empty_history(tmp_path):
     assert payload["status"] == "ok"
     assert payload["records_checked"] == 0
     assert payload["issues"] == []
+    assert payload["issue_groups"] == []
 
 
 def test_format_records_doctor_readable_summary(tmp_path):
@@ -501,6 +518,25 @@ def test_format_records_doctor_readable_summary(tmp_path):
     assert "status: ok" in output
     assert "records_checked: 0" in output
     assert "issues: none" in output
+
+
+def test_format_records_doctor_readable_summary_includes_issue_groups(tmp_path):
+    write_history(
+        tmp_path,
+        [
+            {
+                "status": "unknown",
+            }
+        ],
+    )
+
+    output = format_records_doctor(records_doctor_payload(str(tmp_path)))
+
+    assert "issue_groups:" in output
+    assert "warning invalid_status count=1" in output
+    assert "warning run_id_missing count=1" in output
+    assert "warning task_id_missing count=1" in output
+    assert "info url_missing count=1" in output
 
 
 def test_records_schema_payload_describes_all_records_surfaces():
@@ -514,6 +550,7 @@ def test_records_schema_payload_describes_all_records_surfaces():
         "count": "int",
     }
     assert payload["commands"]["metadata"]["selector_mode"] == "exactly_one_required"
+    assert payload["commands"]["doctor"]["json_shape"]["issue_groups"] == "list[doctor_issue_group]"
     assert payload["commands"]["doctor"]["json_shape"]["issues"] == "list[doctor_issue]"
     assert payload["shared_payloads"]["doctor_issue"] == [
         "code",
@@ -525,6 +562,14 @@ def test_records_schema_payload_describes_all_records_surfaces():
         "task_id",
         "url",
         "target_path",
+    ]
+    assert payload["shared_payloads"]["doctor_issue_group"] == [
+        "code",
+        "severity",
+        "count",
+        "impact",
+        "suggested_action",
+        "sample_records",
     ]
     assert payload["commands"]["show"]["json_shape"]["suggested_debug"] == "list[debug_action]"
     assert payload["shared_payloads"]["metadata_locator"] == {
