@@ -618,6 +618,76 @@ def test_refresh_downloaded_bytes_uses_existing_chunk_sizes(tmp_path):
     assert downloader.downloaded_bytes == 65
 
 
+def test_create_chunk_does_not_split_tail_below_min_split_size(tmp_path):
+    async def run_case():
+        manager = Manager(min_split_size="1M", log_path=None)
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_path / "tmp"),
+        )
+        downloader.file_size = 2 * 1024 * 1024 - 1
+        downloader.chunk_root = Chunk(
+            downloader,
+            0,
+            downloader.file_size - 1,
+            str(tmp_path / "tmp" / "file.bin.0"),
+        )
+        downloader.chunk_root.size = 0
+        writes = []
+
+        async def record_write():
+            writes.append(True)
+
+        downloader._write_static_resume_metadata = record_write
+
+        new_chunk = await downloader.create_chunk()
+
+        assert new_chunk is None
+        assert downloader.chunk_root.next is None
+        assert writes == []
+
+    asyncio.run(run_case())
+
+
+def test_create_chunk_splits_only_when_both_sides_meet_min_split_size(tmp_path):
+    async def run_case():
+        manager = Manager(min_split_size="1M", log_path=None)
+        downloader = Downloader(
+            manager,
+            "https://example.com/file.bin",
+            str(tmp_path),
+            filename="file.bin",
+            pdm_tmp=str(tmp_path / "tmp"),
+        )
+        downloader.file_size = 4 * 1024 * 1024
+        downloader.chunk_root = Chunk(
+            downloader,
+            0,
+            downloader.file_size - 1,
+            str(tmp_path / "tmp" / "file.bin.0"),
+        )
+        downloader.chunk_root.size = 0
+        writes = []
+
+        async def record_write():
+            writes.append(True)
+
+        downloader._write_static_resume_metadata = record_write
+
+        new_chunk = await downloader.create_chunk()
+
+        assert new_chunk is not None
+        assert new_chunk.start >= manager.min_split_size
+        assert downloader.chunk_root.end + 1 == new_chunk.start
+        assert new_chunk.end == downloader.file_size - 1
+        assert writes == [True]
+
+    asyncio.run(run_case())
+
+
 def test_quit_if_exists_skips_named_file_before_parse_config(tmp_path):
     async def run_case():
         existing_file = tmp_path / "already-there.bin"

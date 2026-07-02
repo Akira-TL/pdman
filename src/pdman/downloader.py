@@ -917,23 +917,28 @@ class Downloader:
                 if gap > max_gap:
                     max_gap = gap
                     target_chunk = chunk
-            if target_chunk is None or max_gap <= self.parent.min_split_size:
+            if target_chunk is None or max_gap < self.parent.min_split_size * 2:
                 return None
-            new_start = (
-                target_chunk.start
-                + target_chunk.size
-                + (target_chunk.next.start if target_chunk.next else target_chunk.end)
-            ) // 2
+            remaining_start = target_chunk.start + target_chunk.size
+            remaining_end = (
+                target_chunk.next.start - 1
+                if target_chunk.next
+                else target_chunk.end
+            )
+            new_start = remaining_start + max_gap // 2
             if new_start // 10240:
                 new_start -= new_start % 10240
+            front_remaining = new_start - remaining_start
+            back_remaining = remaining_end - new_start + 1
+            if (
+                front_remaining < self.parent.min_split_size
+                or back_remaining < self.parent.min_split_size
+            ):
+                return None
             new_chunk = Chunk(
                 self,
                 new_start,
-                (
-                    target_chunk.next.start - 1
-                    if target_chunk.next
-                    else target_chunk.end
-                ),
+                remaining_end,
                 os.path.join(self.pdm_tmp, f"{self.filename}.{new_start}"),
                 target_chunk,
                 next=target_chunk.next,
@@ -1651,10 +1656,13 @@ class Downloader:
                         await asyncio.gather(*tasks, return_exceptions=True)
                     raise exc
                 d.result()
+            await self._write_static_resume_metadata()
 
         # 在锁保护下收集所有初始 chunk 引用，避免并发修改链表导致迭代器异常
         async with self.lock:
-            chunks_to_start = [chunk for chunk in self.chunk_root]
+            chunks_to_start = [
+                chunk for chunk in self.chunk_root if chunk._needs_download()
+            ]
         for chunk in chunks_to_start:
             if tasks.__len__() < self.parent.max_concurrent_downloads:
                 self.parent._logger.debug(
@@ -1693,6 +1701,7 @@ class Downloader:
             tasks.append(asyncio.create_task(new_chunk.download()))
         try:
             await asyncio.gather(*tasks)
+            await self._write_static_resume_metadata()
             size_mismatch = self._static_downloaded_size_mismatch()
             if size_mismatch is not None:
                 expected_bytes, actual_bytes = size_mismatch

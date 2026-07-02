@@ -132,6 +132,11 @@ class Chunk:
         if self.next is not None and getattr(self.next, 'forward', None) is self:
             return
         if self.size != self.end - self.start + 1:
+            if self.size <= 0:
+                self.parent._logger.debug(
+                    f"Chunk made no progress, leaving unchanged for retry: {self}"
+                )
+                return
             self.parent._logger.debug(
                 f"Chunk not fully downloaded, splitting chunk: {self}"
             )
@@ -150,6 +155,7 @@ class Chunk:
                 )
                 self.end = new_start - 1
                 self.next = new_chunk
+            await self.parent._write_static_resume_metadata()
 
     async def download(self):
         assert self.end is not None or self.size >= 0
@@ -192,6 +198,13 @@ class Chunk:
                                 else:
                                     raise RuntimeError(f"range HTTP {response.status}")
                     except aiohttp.client_exceptions.ClientPayloadError:
+                        await asyncio.sleep(
+                            self.parent.parent.retry_wait + random.random() * 5
+                        )
+                    except aiohttp.ClientConnectionError as e:
+                        self.parent._logger.debug(
+                            f"Connection error downloading chunk {self}: {e}, retrying..."
+                        )
                         await asyncio.sleep(
                             self.parent.parent.retry_wait + random.random() * 5
                         )
