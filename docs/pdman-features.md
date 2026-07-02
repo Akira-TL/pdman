@@ -869,6 +869,21 @@ v0.8.10 起，`records doctor` 的 issue payload 增加 `impact` 和 `suggested_
 
 v0.8.11 起，`records doctor --json` 增加 `issue_groups`。它基于过滤后的 issues 按 code 聚合，输出 `code`、`severity`、`count`、`impact`、`suggested_action` 和最多 3 条 `sample_records`。readable 输出会先显示分组摘要，JSONL 继续保持逐 issue 输出。
 
+v0.8.12 起，doctor contract 提供稳定示例 payload：`ok`、`warning_grouped`、`filtered_warning`。示例由纯内存 helper 生成，只用于测试、文档和 agent contract 对照，不读取 cache，不启动下载。精简 JSON 示例：
+
+```json
+{
+  "schema_version": 1,
+  "status": "warning",
+  "records_checked": 2,
+  "issue_count": 1,
+  "total_issue_count": 3,
+  "filters": {"severities": ["warning"], "codes": ["invalid_status"]},
+  "issue_groups": [{"code": "invalid_status", "severity": "warning", "count": 1}],
+  "issues": [{"code": "invalid_status", "impact": "...", "suggested_action": "..."}]
+}
+```
+
 Records 与 history/run 的边界：
 
 | Surface | 定位 |
@@ -877,7 +892,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.11 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.12 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

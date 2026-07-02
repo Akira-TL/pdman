@@ -9,6 +9,7 @@ from pdman.records import (
     metadata_locator,
     query_records,
     record_summary,
+    records_doctor_example_payload,
     records_doctor_exit_code,
     records_doctor_payload,
     records_metadata_payload,
@@ -373,6 +374,68 @@ def test_format_records_metadata_readable_summary(tmp_path):
     assert "dynamic_ranges: missing" in output
 
 
+def test_records_doctor_example_payload_ok_contract():
+    payload = records_doctor_example_payload("ok")
+
+    assert payload["schema_version"] == 1
+    assert payload["status"] == "ok"
+    assert payload["records_checked"] == 0
+    assert payload["issue_count"] == 0
+    assert payload["total_issue_count"] == 0
+    assert payload["filters"] == {"severities": [], "codes": []}
+    assert payload["issue_groups"] == []
+    assert payload["issues"] == []
+
+
+def test_records_doctor_example_payload_warning_grouped_contract():
+    payload = records_doctor_example_payload("warning_grouped")
+
+    assert payload["schema_version"] == 1
+    assert payload["status"] == "warning"
+    assert payload["records_checked"] == 2
+    assert payload["issue_count"] == 3
+    assert payload["total_issue_count"] == 3
+    assert [issue["code"] for issue in payload["issues"]] == [
+        "run_id_missing",
+        "invalid_status",
+        "url_missing",
+    ]
+    assert [group["code"] for group in payload["issue_groups"]] == [
+        "run_id_missing",
+        "invalid_status",
+        "url_missing",
+    ]
+    assert set(payload["issue_groups"][0]["sample_records"][0]) == {
+        "run_id",
+        "task_id",
+        "url",
+        "target_path",
+    }
+
+
+def test_records_doctor_example_payload_filtered_warning_contract():
+    payload = records_doctor_example_payload("filtered_warning")
+
+    assert payload["status"] == "warning"
+    assert payload["issue_count"] == 1
+    assert payload["total_issue_count"] == 3
+    assert payload["filters"] == {
+        "severities": ["warning"],
+        "codes": ["invalid_status"],
+    }
+    assert [issue["code"] for issue in payload["issues"]] == ["invalid_status"]
+    assert [group["code"] for group in payload["issue_groups"]] == ["invalid_status"]
+
+
+def test_records_doctor_example_payload_rejects_unknown_kind():
+    try:
+        records_doctor_example_payload("missing")
+    except ValueError as exc:
+        assert "Unknown records doctor example kind" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_records_doctor_payload_reports_history_and_metadata_health(tmp_path):
     url = "https://example.com/file.bin"
     url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
@@ -550,6 +613,11 @@ def test_records_schema_payload_describes_all_records_surfaces():
         "count": "int",
     }
     assert payload["commands"]["metadata"]["selector_mode"] == "exactly_one_required"
+    assert payload["commands"]["doctor"]["examples"] == [
+        "ok",
+        "warning_grouped",
+        "filtered_warning",
+    ]
     assert payload["commands"]["doctor"]["json_shape"]["issue_groups"] == "list[doctor_issue_group]"
     assert payload["commands"]["doctor"]["json_shape"]["issues"] == "list[doctor_issue]"
     assert payload["shared_payloads"]["doctor_issue"] == [

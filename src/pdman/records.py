@@ -309,6 +309,113 @@ def records_doctor_payload(
     }
 
 
+def _doctor_payload_from_parts(
+    *,
+    records_checked: int,
+    status_counts: dict[str, int],
+    metadata_state_counts: dict[str, int],
+    issues: list[dict[str, Any]],
+    total_issue_count: int | None = None,
+    severities: set[str] | None = None,
+    codes: set[str] | None = None,
+) -> dict[str, Any]:
+    if total_issue_count is None:
+        total_issue_count = len(issues)
+    issue_groups = _group_doctor_issues(issues)
+    error_count = sum(1 for issue in issues if issue.get("severity") == "error")
+    warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
+    return {
+        "schema_version": 1,
+        "status": "error" if error_count else "warning" if warning_count else "ok",
+        "records_checked": records_checked,
+        "issue_count": len(issues),
+        "total_issue_count": total_issue_count,
+        "filters": {
+            "severities": sorted(severities) if severities else [],
+            "codes": sorted(codes) if codes else [],
+        },
+        "warning_count": warning_count,
+        "error_count": error_count,
+        "status_counts": status_counts,
+        "metadata_state_counts": metadata_state_counts,
+        "issue_groups": issue_groups,
+        "issues": issues,
+    }
+
+
+def records_doctor_example_payload(kind: str = "warning_grouped") -> dict[str, Any]:
+    status_counts = {status: 0 for status in VALID_STATUSES}
+    empty_metadata_counts = {"available": 0, "missing": 0, "unavailable": 0}
+    if kind == "ok":
+        return _doctor_payload_from_parts(
+            records_checked=0,
+            status_counts=status_counts,
+            metadata_state_counts=empty_metadata_counts,
+            issues=[],
+        )
+    if kind == "warning_grouped":
+        status_counts["completed"] = 1
+        issues = [
+            _doctor_issue(
+                {
+                    "task_id": "task-1",
+                    "target_path": "/downloads/missing-run.bin",
+                    "status": "completed",
+                },
+                code="run_id_missing",
+                severity="warning",
+                message="Record is missing run_id.",
+            ),
+            _doctor_issue(
+                {
+                    "run_id": "run-2",
+                    "task_id": "task-2",
+                    "target_path": "/downloads/unknown-status.bin",
+                    "status": "unknown",
+                },
+                code="invalid_status",
+                severity="warning",
+                message="Record status is missing or not supported by the records schema.",
+            ),
+            _doctor_issue(
+                {
+                    "run_id": "run-2",
+                    "task_id": "task-2",
+                    "target_path": "/downloads/unknown-status.bin",
+                    "status": "unknown",
+                },
+                code="url_missing",
+                severity="info",
+                message="Record is missing url, so metadata locator cannot be derived.",
+            ),
+        ]
+        return _doctor_payload_from_parts(
+            records_checked=2,
+            status_counts=status_counts,
+            metadata_state_counts={"available": 0, "missing": 0, "unavailable": 2},
+            issues=issues,
+        )
+    if kind == "filtered_warning":
+        full = records_doctor_example_payload("warning_grouped")
+        severities = {"warning"}
+        codes = {"invalid_status"}
+        filtered = _filter_doctor_issues(
+            full["issues"],
+            severities=severities,
+            codes=codes,
+        )
+        return _doctor_payload_from_parts(
+            records_checked=full["records_checked"],
+            status_counts=full["status_counts"],
+            metadata_state_counts=full["metadata_state_counts"],
+            issues=filtered,
+            total_issue_count=full["total_issue_count"],
+            severities=severities,
+            codes=codes,
+        )
+    raise ValueError(f"Unknown records doctor example kind: {kind}")
+
+
 def records_doctor_exit_code(payload: dict[str, Any], fail_on: str = "never") -> int:
     if fail_on == "never":
         return 0
@@ -420,6 +527,7 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
                 "issue_groups": "list[doctor_issue_group]",
                 "issues": "list[doctor_issue]",
             },
+            "examples": ["ok", "warning_grouped", "filtered_warning"],
         },
         "show": {
             "introduced_in": "0.8.3",
@@ -829,6 +937,7 @@ __all__ = [
     "metadata_locator",
     "query_records",
     "record_summary",
+    "records_doctor_example_payload",
     "records_doctor_exit_code",
     "records_doctor_payload",
     "records_metadata_payload",

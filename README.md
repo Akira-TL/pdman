@@ -379,6 +379,20 @@ v0.8.10 起，`records doctor` 的每个 issue 增加 `impact` 和 `suggested_ac
 
 v0.8.11 起，`records doctor --json` 额外输出 `issue_groups`，按 issue code 聚合 `count`、`impact`、`suggested_action` 和少量 `sample_records`。readable 输出也会先显示 `issue_groups` 摘要；`--jsonl` 仍保持逐 issue 输出。
 
+v0.8.12 起，doctor contract 提供稳定示例 payload：`ok`、`warning_grouped`、`filtered_warning`。示例用于测试和文档，不读取 cache，不启动下载。精简 JSON 结构如下：
+
+```json
+{
+  "schema_version": 1,
+  "status": "warning",
+  "issue_count": 1,
+  "total_issue_count": 3,
+  "filters": {"severities": ["warning"], "codes": ["invalid_status"]},
+  "issue_groups": [{"code": "invalid_status", "count": 1, "sample_records": [{"run_id": "run-2", "task_id": "task-2"}]}],
+  "issues": [{"code": "invalid_status", "impact": "...", "suggested_action": "..."}]
+}
+```
+
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 
 ### 本地队列命令
