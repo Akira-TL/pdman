@@ -37,6 +37,15 @@ from .queue import append_queue, clear_queue, create_queue_records, finish_queue
 from .queue import format_queue, format_queue_validation, load_queue, query_queue
 from .queue import recover_running, remove_queue_records, repair_queue
 from .queue import retry_failed_candidates, start_queue_records, validate_queue
+from .records import (
+    format_record_show,
+    format_records,
+    format_records_metadata,
+    query_records,
+    records_metadata_payload,
+    records_payload,
+    records_show_payload,
+)
 from .range_metadata_inspect import (
     RangeMetadataError,
     find_latest_range_metadata_diagnostics,
@@ -124,6 +133,108 @@ def handle_run_command(argv=None) -> int:
         return 0
     print(format_run_detail(run, tasks))
     return 0
+
+
+def handle_records_list_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman records list")
+    parser.add_argument("--last", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--status",
+        choices=("completed", "skipped", "failed"),
+        default=None,
+    )
+    parser.add_argument("--url", default=None)
+    parser.add_argument("--target", default=None)
+    parser.add_argument("--run-id", default=None)
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    limit = args.limit if args.limit is not None else args.last
+    records = query_records(
+        args.cache_dir,
+        limit=limit,
+        status=args.status,
+        url=args.url,
+        target=args.target,
+        run_id=args.run_id,
+    )
+    payload = records_payload(records)
+    if args.json:
+        print_json(payload)
+        return 0
+    if args.jsonl:
+        print_jsonl(payload["records"])
+        return 0
+    print(format_records(records))
+    return 0
+
+
+def handle_records_show_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman records show")
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--task-id", required=True)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    payload = records_show_payload(
+        args.cache_dir,
+        run_id=args.run_id,
+        task_id=args.task_id,
+    )
+    if payload is None:
+        print(f"Record not found: {args.run_id}/{args.task_id}")
+        return 1
+    if args.json:
+        print_json(payload)
+        return 0
+    print(format_record_show(payload))
+    return 0
+
+
+def handle_records_metadata_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman records metadata")
+    query_group = parser.add_mutually_exclusive_group(required=True)
+    query_group.add_argument("--url", default=None)
+    query_group.add_argument("--target", default=None)
+    query_group.add_argument("--run-id", default=None)
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--jsonl", action="store_true")
+    parser.add_argument("--cache-dir", default=None)
+    args = parser.parse_args(argv)
+    payload = records_metadata_payload(
+        args.cache_dir,
+        url=args.url,
+        target=args.target,
+        run_id=args.run_id,
+    )
+    if args.json:
+        print_json(payload)
+        return 0
+    if args.jsonl:
+        print_jsonl(payload["matches"])
+        return 0
+    print(format_records_metadata(payload))
+    return 0
+
+
+def handle_records_command(argv=None) -> int:
+    argv = list(argv or [])
+    if not argv:
+        print("Records command required: list, metadata, or show")
+        return 1
+    command, rest = argv[0], argv[1:]
+    if command == "list":
+        return handle_records_list_command(rest)
+    if command == "metadata":
+        return handle_records_metadata_command(rest)
+    if command == "show":
+        return handle_records_show_command(rest)
+    print(f"Unknown records command: {command}")
+    return 1
 
 
 def handle_queue_add_command(argv=None) -> int:
@@ -565,12 +676,14 @@ def handle_subcommand(argv=None) -> int:
         return handle_queue_command(rest)
     if command == "debug":
         return handle_debug_command(rest)
+    if command == "records":
+        return handle_records_command(rest)
     return 1
 
 
 def main(argv=None):
     argv = list(argv) if argv is not None else sys.argv[1:]
-    if argv and argv[0] in {"history", "runs", "run", "queue", "debug"}:
+    if argv and argv[0] in {"history", "runs", "run", "queue", "debug", "records"}:
         return handle_subcommand(argv)
 
     parser = argparse.ArgumentParser()

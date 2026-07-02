@@ -637,7 +637,189 @@ pdman run <run-id>
 
 v0.4.1 不提供 history 删除、时间范围过滤、active run 查询或 retry failed。
 
-### 8.2 Queue foundation
+### 8.2 Records query foundation
+
+v0.8.0 新增只读 records query entrypoint：
+
+```bash
+pdman records list
+pdman records list --last 50
+pdman records list --limit 20
+pdman records list --status failed
+pdman records list --url https://example.com/file.bin
+pdman records list --target /downloads/file.bin
+pdman records list --run-id <run-id>
+pdman records list --json
+pdman records list --jsonl
+pdman records list --cache-dir /path/to/cache --json
+pdman records metadata --url https://example.com/file.bin
+pdman records metadata --target /downloads/file.bin
+pdman records metadata --run-id <run-id>
+pdman records metadata --url https://example.com/file.bin --json
+pdman records metadata --run-id <run-id> --jsonl
+pdman records show --run-id <run-id> --task-id <task-id>
+pdman records show --run-id <run-id> --task-id <task-id> --json
+```
+
+`records list` 当前只读取 runtime history，不读取完整 `resume-metadata.json` 或 `dynamic-ranges.json`，也不会启动下载任务、修改 queue、恢复下载、清理 tmp、迁移旧历史或创建 database/index。它的定位是 agent-oriented view：在不要求 agent grep cache 文件的前提下，提供稳定的最近 task record summary。
+
+`records list --json` 输出：
+
+```json
+{
+  "records": [
+    {
+      "run_id": "...",
+      "task_id": "...",
+      "url": "...",
+      "filename": "...",
+      "target_path": null,
+      "status": "completed",
+      "file_size": 123456,
+      "created_at": "...",
+      "completed_at": "...",
+      "resume_rejection": {
+        "present": false,
+        "code": null,
+        "reason": null
+      },
+      "header_probe": {
+        "method": "HEAD",
+        "fallback_used": false,
+        "fallback_reason": null
+      },
+      "network_error": {
+        "present": false,
+        "phase": null,
+        "kind": null,
+        "http_status": null
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+`--jsonl` 每行输出一个同形 record。readable 输出允许面向人类阅读优化；脚本和 agent 应使用 `--json` 或 `--jsonl`。
+
+v0.8.1 为 `records list` 增加基础过滤 contract：
+
+| 参数 | 行为 |
+| --- | --- |
+| `--status completed|skipped|failed` | 精确匹配 task status。 |
+| `--url URL` | 精确匹配 history record 中的 `url`。 |
+| `--target PATH` | 精确匹配 history record 中的 `target_path` 或兼容字段 `filepath`，不做绝对/相对路径推断。 |
+| `--run-id RUN_ID` | 精确匹配 `run_id`。 |
+| `--limit N` | 过滤完成后保留最近 N 条；`0` 表示不限制数量。 |
+
+`--last` 作为 v0.8.0 的兼容参数保留，语义同 `--limit`；如果二者同时出现，以 `--limit` 为准。v0.8.1 不支持 fuzzy search、regex、contains、URL normalization、path normalization、时间范围查询或 SQL-like query。
+
+v0.8.2 新增 metadata locator foundation：
+
+```bash
+pdman records metadata --url https://example.com/file.bin
+pdman records metadata --target /downloads/file.bin
+pdman records metadata --run-id <run-id>
+pdman records metadata --url https://example.com/file.bin --json
+pdman records metadata --run-id <run-id> --jsonl
+```
+
+`records metadata` 查询参数互斥且必须提供一个。`--url` 可直接根据当前 cache layout 推导 metadata 路径；如果 history 中也有该 URL，会为每个匹配 record 返回一个 match。`--target` 和 `--run-id` 先通过 history records 精确匹配，再根据匹配 record 的 URL 推导 locator。record 缺失 URL 时不会生成 locator。
+
+JSON 输出：
+
+```json
+{
+  "query": {
+    "url": "https://example.com/file.bin",
+    "target_path": null,
+    "run_id": null
+  },
+  "matches": [
+    {
+      "run_id": "...",
+      "task_id": "...",
+      "url": "https://example.com/file.bin",
+      "target_path": "/downloads/file.bin",
+      "metadata": {
+        "resume": {
+          "path": ".../resume-metadata.json",
+          "exists": true,
+          "source": "cache"
+        },
+        "dynamic_ranges": {
+          "path": ".../dynamic-ranges.json",
+          "exists": false,
+          "source": "cache"
+        }
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+`--jsonl` 每行输出一个 match。locator 只报告路径是否存在，不读取、validate 或嵌入完整 `resume-metadata.json` / `dynamic-ranges.json` 内容。当前 locator 使用 `cache_root/metadata/<url-hash>/` 推导路径；这是 cache layout，不是 database schema，也不是永久 ID contract。
+
+v0.8.3 新增 single record inspection：
+
+```bash
+pdman records show --run-id <run-id> --task-id <task-id>
+pdman records show --run-id <run-id> --task-id <task-id> --json
+```
+
+`records show` 通过 `run_id + task_id` 精确定位一个 history task record，输出基础 task summary、compact error、`resume_rejection`、`header_probe`、`network_error`、metadata locator 和 `suggested_commands`。JSON 输出形态：
+
+```json
+{
+  "run_id": "...",
+  "task_id": "...",
+  "url": "...",
+  "filename": "...",
+  "target_path": "...",
+  "status": "failed",
+  "file_size": 123,
+  "created_at": "...",
+  "completed_at": "...",
+  "resume_rejection": {},
+  "header_probe": {},
+  "network_error": {},
+  "error": {
+    "reason": "...",
+    "reason_code": "...",
+    "error": "..."
+  },
+  "metadata": {
+    "resume": {
+      "path": ".../resume-metadata.json",
+      "exists": true,
+      "source": "cache"
+    },
+    "dynamic_ranges": {
+      "path": ".../dynamic-ranges.json",
+      "exists": false,
+      "source": "cache"
+    }
+  },
+  "suggested_commands": [
+    "pdman debug resume --metadata ..."
+  ]
+}
+```
+
+`suggested_commands` 只在对应 metadata 文件真实存在时生成；不会假设 metadata 一定存在。`records show` 不读取完整 metadata，不执行 debug 命令，不恢复或修复下载，也不改变 history/run/debug 旧 contract。
+
+Records 与 history/run 的边界：
+
+| Surface | 定位 |
+| --- | --- |
+| `pdman history` | 原始 runtime history 查询视角，保留既有 history contract。 |
+| `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
+| `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
+
+v0.8.3 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+
+### 8.3 Queue foundation
 
 v0.4.3 引入本地 JSONL 队列基础：
 

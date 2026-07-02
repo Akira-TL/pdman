@@ -320,6 +320,40 @@ pdman run <run-id>
 
 这些命令只读取 `~/.cache/pdman` 中的历史记录，不会启动下载任务。也可以用 `--cache-dir DIR` 查询自定义 cache 目录。
 
+### Records 查询命令
+
+v0.8.0 开始，`pdman records list` 提供面向 agent 和脚本的只读 records summary。它读取现有 runtime history，但输出的是压缩后的 task record view，用于稳定回答“最近有哪些任务、属于哪个 run/task、URL 和文件名是什么、状态和关键诊断是什么”。
+
+```bash
+pdman records list
+pdman records list --last 50
+pdman records list --limit 20
+pdman records list --status failed
+pdman records list --url https://example.com/file.bin
+pdman records list --target /downloads/file.bin
+pdman records list --run-id <run-id>
+pdman records list --json
+pdman records list --jsonl
+pdman records list --cache-dir /data/cache/pdman --json
+pdman records metadata --url https://example.com/file.bin
+pdman records metadata --target /downloads/file.bin
+pdman records metadata --run-id <run-id>
+pdman records metadata --url https://example.com/file.bin --json
+pdman records metadata --run-id <run-id> --jsonl
+pdman records show --run-id <run-id> --task-id <task-id>
+pdman records show --run-id <run-id> --task-id <task-id> --json
+```
+
+`records list --json` 输出 `{records, count}`；每个 record 包含 `run_id`、`task_id`、`url`、`filename`、`target_path`、`status`、`file_size`、`created_at`、`completed_at`、`resume_rejection`、`header_probe` 和 `network_error`。`--jsonl` 每行输出一个 record，方便 agent 或管道逐条处理。
+
+v0.8.1 起，`records list` 支持基础 exact-match filters：`--status completed|skipped|failed`、`--url URL`、`--target PATH`、`--run-id RUN_ID` 和 `--limit N`。这些过滤不做 fuzzy search、regex、contains 或 URL/path normalization；`--target` 按记录中的目标路径字符串精确匹配。`--limit 0` 表示不过滤数量；保留 `--last` 兼容 v0.8.0，若同时传入 `--limit`，以 `--limit` 为准。
+
+v0.8.2 起，`pdman records metadata` 提供 metadata locator foundation，可按 `--url`、`--target` 或 `--run-id` 查询对应 cache metadata 路径。输出只包含 `resume` 与 `dynamic_ranges` 的 `path`、`exists` 和 `source=cache`，不会读取或输出完整 metadata 内容。`--url` 可以直接根据当前 cache layout 推导路径；`--target` 和 `--run-id` 先通过 history records 匹配，再根据 record URL 推导路径。同一 URL 多次下载到不同 target 时会返回多个 matches。
+
+v0.8.3 起，`pdman records show --run-id <run-id> --task-id <task-id>` 输出单个 task 的 agent-readable summary，包括基础字段、compact error、resume/header/network 诊断、metadata locator 和 `suggested_commands`。建议命令只在对应 metadata 文件真实存在时生成，例如 `pdman debug resume --metadata ...` 或 `pdman debug ranges ...`。
+
+`records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
+
 ### 本地队列命令
 
 v0.4.3 开始，可以把任务写入本地队列后再启动下载：
