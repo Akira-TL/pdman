@@ -346,6 +346,8 @@ pdman records metadata --url https://example.com/file.bin --json
 pdman records metadata --run-id <run-id> --jsonl
 pdman records show --run-id <run-id> --task-id <task-id>
 pdman records show --run-id <run-id> --task-id <task-id> --json
+pdman records schema
+pdman records schema --surface show --json
 ```
 
 `records list --json` 输出 `{records, count}`；每个 record 包含 `run_id`、`task_id`、`url`、`filename`、`target_path`、`status`、`file_size`、`created_at`、`completed_at`、`resume_rejection`、`header_probe` 和 `network_error`。`--jsonl` 每行输出一个 record，方便 agent 或管道逐条处理。
@@ -357,6 +359,8 @@ v0.8.2 起，`pdman records metadata` 提供 metadata locator foundation，可�
 v0.8.3 起，`pdman records show --run-id <run-id> --task-id <task-id>` 输出单个 task 的 agent-readable summary，包括基础字段、compact error、resume/header/network 诊断、metadata locator 和 `suggested_commands`。建议命令只在对应 metadata 文件真实存在时生成，例如 `pdman debug resume --metadata ...` 或 `pdman debug ranges ...`。
 
 v0.8.4 起，`records show --json` 额外提供结构化 `suggested_debug` bridge，供 agent 不解析 shell 字符串也能理解下一步 debug 入口。每个 item 包含 `kind`、`metadata_key`、`metadata_path`、`source`、`reason`、`argv` 和 shell-quoted `command`；`suggested_commands` 作为兼容字段继续保留。
+
+v0.8.5 起，`pdman records schema` 输出 records surface 的 agent-readable contract，描述 `list`、`metadata`、`show` 的 selector、输出格式、共享 payload 和明确 non-goals。`--surface list|metadata|show` 可聚焦单个 surface；`--json` 供脚本和 agent 读取。
 
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 

@@ -105,6 +105,109 @@ def query_records(
     return _apply_limit(records, limit)
 
 
+def records_schema_payload(surface: str = "all") -> dict[str, Any]:
+    commands = {
+        "list": {
+            "introduced_in": "0.8.0",
+            "outputs": ["readable", "json", "jsonl"],
+            "filters": {
+                "status": ["completed", "skipped", "failed"],
+                "url": "exact",
+                "target": "exact_target_path_or_filepath",
+                "run_id": "exact",
+                "limit": "recent_count_after_filters; zero means unlimited",
+                "last": "compatibility alias for limit",
+            },
+            "json_shape": {
+                "records": "list[record_summary]",
+                "count": "int",
+            },
+            "record_summary_fields": list(record_summary({}).keys()),
+        },
+        "metadata": {
+            "introduced_in": "0.8.2",
+            "outputs": ["readable", "json", "jsonl"],
+            "selectors": ["url", "target", "run_id"],
+            "selector_mode": "exactly_one_required",
+            "json_shape": {
+                "query": {
+                    "url": "str|null",
+                    "target_path": "str|null",
+                    "run_id": "str|null",
+                },
+                "matches": "list[metadata_match]",
+                "count": "int",
+            },
+            "metadata_match_fields": [
+                "run_id",
+                "task_id",
+                "url",
+                "target_path",
+                "metadata",
+            ],
+        },
+        "show": {
+            "introduced_in": "0.8.3",
+            "outputs": ["readable", "json"],
+            "selectors": ["run_id", "task_id"],
+            "selector_mode": "both_required",
+            "json_shape": {
+                "record_summary": "record_summary fields at top level",
+                "error": ["reason", "reason_code", "error"],
+                "metadata": "metadata_locator",
+                "suggested_debug": "list[debug_action]",
+                "suggested_commands": "list[str]; compatibility shell commands",
+            },
+        },
+    }
+    if surface != "all":
+        commands = {surface: commands[surface]}
+    return {
+        "schema_version": 1,
+        "surface": surface,
+        "commands": commands,
+        "shared_payloads": {
+            "metadata_locator": {
+                "resume": ["path", "exists", "source"],
+                "dynamic_ranges": ["path", "exists", "source"],
+            },
+            "debug_action": [
+                "kind",
+                "metadata_key",
+                "metadata_path",
+                "source",
+                "reason",
+                "argv",
+                "command",
+            ],
+        },
+        "non_goals": [
+            "database_index_engine",
+            "full_metadata_embedding",
+            "metadata_validation",
+            "metadata_repair",
+            "download_or_queue_mutation",
+        ],
+    }
+
+
+def format_records_schema(payload: dict[str, Any]) -> str:
+    lines = [
+        "Records schema:",
+        f"  schema_version: {payload.get('schema_version')}",
+        f"  surface: {payload.get('surface')}",
+        "  commands:",
+    ]
+    for name, contract in (payload.get("commands") or {}).items():
+        outputs = ", ".join(contract.get("outputs") or [])
+        introduced = contract.get("introduced_in") or "-"
+        lines.append(f"    {name}: introduced={introduced} outputs={outputs}")
+    lines.append("  shared_payloads: metadata_locator, debug_action")
+    non_goals = ", ".join(payload.get("non_goals") or [])
+    lines.append(f"  non_goals: {non_goals}")
+    return "\n".join(lines)
+
+
 def _query_metadata_records(
     cache_dir: str | None,
     *,
@@ -406,11 +509,13 @@ __all__ = [
     "format_record_show",
     "format_records",
     "format_records_metadata",
+    "format_records_schema",
     "metadata_locator",
     "query_records",
     "record_summary",
     "records_metadata_payload",
     "records_payload",
+    "records_schema_payload",
     "records_show_payload",
     "suggested_debug_actions",
     "suggested_debug_commands",

@@ -224,6 +224,28 @@ def test_cli_records_list_filters_status_url_target_and_run_id(tmp_path, capsys)
     assert payload["records"][0]["target_path"] == "/downloads/b.bin"
 
 
+def test_cli_records_schema_json_outputs_contract(capsys):
+    exit_code = cli.main(["records", "schema", "--surface", "show", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["schema_version"] == 1
+    assert payload["surface"] == "show"
+    assert list(payload["commands"]) == ["show"]
+    assert payload["commands"]["show"]["json_shape"]["suggested_debug"] == "list[debug_action]"
+
+
+def test_cli_records_schema_readable_outputs_summary(capsys):
+    exit_code = cli.main(["records", "schema"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Records schema:" in output
+    assert "list: introduced=0.8.0" in output
+    assert "metadata: introduced=0.8.2" in output
+    assert "show: introduced=0.8.3" in output
+
+
 def test_cli_records_show_json_outputs_one_task(tmp_path, capsys):
     url = "https://example.com/file.bin"
     url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
@@ -470,4 +492,4 @@ def test_cli_records_requires_subcommand(capsys):
 
     output = capsys.readouterr().out
     assert exit_code == 1
-    assert "Records command required: list, metadata, or show" in output
+    assert "Records command required: list, metadata, schema, or show" in output

@@ -4,11 +4,13 @@ from pdman.records import (
     format_record_show,
     format_records,
     format_records_metadata,
+    format_records_schema,
     metadata_locator,
     query_records,
     record_summary,
     records_metadata_payload,
     records_payload,
+    records_schema_payload,
     records_show_payload,
     suggested_debug_actions,
     suggested_debug_commands,
@@ -349,6 +351,42 @@ def test_format_records_metadata_readable_summary(tmp_path):
     assert "-/- url=https://example.com/file.bin target=-" in output
     assert "resume: missing" in output
     assert "dynamic_ranges: missing" in output
+
+
+def test_records_schema_payload_describes_all_records_surfaces():
+    payload = records_schema_payload()
+
+    assert payload["schema_version"] == 1
+    assert payload["surface"] == "all"
+    assert set(payload["commands"]) == {"list", "metadata", "show"}
+    assert payload["commands"]["list"]["json_shape"] == {
+        "records": "list[record_summary]",
+        "count": "int",
+    }
+    assert payload["commands"]["metadata"]["selector_mode"] == "exactly_one_required"
+    assert payload["commands"]["show"]["json_shape"]["suggested_debug"] == "list[debug_action]"
+    assert payload["shared_payloads"]["metadata_locator"] == {
+        "resume": ["path", "exists", "source"],
+        "dynamic_ranges": ["path", "exists", "source"],
+    }
+    assert "database_index_engine" in payload["non_goals"]
+
+
+def test_records_schema_payload_can_focus_one_surface():
+    payload = records_schema_payload(surface="show")
+
+    assert payload["surface"] == "show"
+    assert list(payload["commands"]) == ["show"]
+    assert payload["commands"]["show"]["selector_mode"] == "both_required"
+
+
+def test_format_records_schema_readable_summary():
+    output = format_records_schema(records_schema_payload(surface="metadata"))
+
+    assert "Records schema:" in output
+    assert "surface: metadata" in output
+    assert "metadata: introduced=0.8.2" in output
+    assert "shared_payloads: metadata_locator, debug_action" in output
 
 
 def test_suggested_debug_actions_include_argv_and_shell_command(tmp_path):

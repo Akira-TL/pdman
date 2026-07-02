@@ -663,6 +663,8 @@ pdman records metadata --url https://example.com/file.bin --json
 pdman records metadata --run-id <run-id> --jsonl
 pdman records show --run-id <run-id> --task-id <task-id>
 pdman records show --run-id <run-id> --task-id <task-id> --json
+pdman records schema
+pdman records schema --surface show --json
 ```
 
 `records list` 当前只读取 runtime history，不读取完整 `resume-metadata.json` 或 `dynamic-ranges.json`，也不会启动下载任务、修改 queue、恢复下载、清理 tmp、迁移旧历史或创建 database/index。它的定位是 agent-oriented view：在不要求 agent grep cache 文件的前提下，提供稳定的最近 task record summary。
@@ -824,6 +826,17 @@ pdman records show --run-id <run-id> --task-id <task-id> --json
 
 v0.8.4 将 debug bridge 明确为结构化建议而非执行入口。`suggested_debug` 每项包含 `kind`、`metadata_key`、`metadata_path`、`source`、`reason`、`argv` 和 shell-quoted `command`；agent 优先使用 `argv`，人类可直接复制 `command`。`suggested_commands` 作为兼容字段保留，仍只在对应 metadata 文件真实存在时生成。`records show` 不读取完整 metadata，不执行 debug 命令，不恢复或修复下载，也不改变 history/run/debug 旧 contract。
 
+v0.8.5 新增 records schema contract：
+
+```bash
+pdman records schema
+pdman records schema --surface list --json
+pdman records schema --surface metadata --json
+pdman records schema --surface show --json
+```
+
+`records schema` 输出 records surface 的机器可读 contract，包括 `list`、`metadata`、`show` 的 selector、输出格式、共享 payload 和 non-goals。默认 `--surface all` 输出全部 surface；`--surface list|metadata|show` 只输出单个 surface。readable 输出面向人工快速确认；`--json` 用于脚本和 agent。
+
 Records 与 history/run 的边界：
 
 | Surface | 定位 |
@@ -832,7 +845,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.4 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.5 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

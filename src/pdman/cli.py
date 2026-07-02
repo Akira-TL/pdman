@@ -41,9 +41,11 @@ from .records import (
     format_record_show,
     format_records,
     format_records_metadata,
+    format_records_schema,
     query_records,
     records_metadata_payload,
     records_payload,
+    records_schema_payload,
     records_show_payload,
 )
 from .range_metadata_inspect import (
@@ -172,6 +174,23 @@ def handle_records_list_command(argv=None) -> int:
     return 0
 
 
+def handle_records_schema_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman records schema")
+    parser.add_argument(
+        "--surface",
+        choices=("all", "list", "metadata", "show"),
+        default="all",
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    payload = records_schema_payload(surface=args.surface)
+    if args.json:
+        print_json(payload)
+        return 0
+    print(format_records_schema(payload))
+    return 0
+
+
 def handle_records_show_command(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="pdman records show")
     parser.add_argument("--run-id", required=True)
@@ -224,13 +243,15 @@ def handle_records_metadata_command(argv=None) -> int:
 def handle_records_command(argv=None) -> int:
     argv = list(argv or [])
     if not argv:
-        print("Records command required: list, metadata, or show")
+        print("Records command required: list, metadata, schema, or show")
         return 1
     command, rest = argv[0], argv[1:]
     if command == "list":
         return handle_records_list_command(rest)
     if command == "metadata":
         return handle_records_metadata_command(rest)
+    if command == "schema":
+        return handle_records_schema_command(rest)
     if command == "show":
         return handle_records_show_command(rest)
     print(f"Unknown records command: {command}")
