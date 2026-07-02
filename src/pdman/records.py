@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -172,24 +173,47 @@ def records_metadata_payload(
     }
 
 
-def _debug_command_for_metadata(label: str, item: dict[str, Any]) -> str | None:
+def _shell_command(argv: list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in argv)
+
+
+def _debug_action_for_metadata(
+    label: str,
+    item: dict[str, Any],
+) -> dict[str, Any] | None:
     path = item.get("path")
-    if not item.get("exists") or not path:
+    if not item.get("exists") or not isinstance(path, str) or not path:
         return None
     if label == "resume":
-        return f"pdman debug resume --metadata {path}"
-    if label == "dynamic_ranges":
-        return f"pdman debug ranges {path}"
-    return None
+        argv = ["pdman", "debug", "resume", "--metadata", path]
+        kind = "resume_metadata"
+    elif label == "dynamic_ranges":
+        argv = ["pdman", "debug", "ranges", path]
+        kind = "dynamic_ranges"
+    else:
+        return None
+    return {
+        "kind": kind,
+        "metadata_key": label,
+        "metadata_path": path,
+        "source": item.get("source") or "cache",
+        "reason": "metadata_exists",
+        "argv": argv,
+        "command": _shell_command(argv),
+    }
+
+
+def suggested_debug_actions(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for label in ("resume", "dynamic_ranges"):
+        action = _debug_action_for_metadata(label, metadata.get(label) or {})
+        if action is not None:
+            actions.append(action)
+    return actions
 
 
 def suggested_debug_commands(metadata: dict[str, Any]) -> list[str]:
-    commands: list[str] = []
-    for label in ("resume", "dynamic_ranges"):
-        command = _debug_command_for_metadata(label, metadata.get(label) or {})
-        if command is not None:
-            commands.append(command)
-    return commands
+    return [action["command"] for action in suggested_debug_actions(metadata)]
 
 
 def _record_error_payload(record: dict[str, Any]) -> dict[str, Any]:
@@ -219,7 +243,9 @@ def records_show_payload(
     url = record.get("url")
     metadata = metadata_locator(cache_dir, url) if isinstance(url, str) and url else {}
     payload["metadata"] = metadata
-    payload["suggested_commands"] = suggested_debug_commands(metadata)
+    actions = suggested_debug_actions(metadata)
+    payload["suggested_debug"] = actions
+    payload["suggested_commands"] = [action["command"] for action in actions]
     return payload
 
 
@@ -386,5 +412,6 @@ __all__ = [
     "records_metadata_payload",
     "records_payload",
     "records_show_payload",
+    "suggested_debug_actions",
     "suggested_debug_commands",
 ]

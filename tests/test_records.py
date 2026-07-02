@@ -10,6 +10,7 @@ from pdman.records import (
     records_metadata_payload,
     records_payload,
     records_show_payload,
+    suggested_debug_actions,
     suggested_debug_commands,
 )
 
@@ -350,8 +351,9 @@ def test_format_records_metadata_readable_summary(tmp_path):
     assert "dynamic_ranges: missing" in output
 
 
-def test_suggested_debug_commands_only_include_existing_metadata(tmp_path):
-    resume = tmp_path / "resume-metadata.json"
+def test_suggested_debug_actions_include_argv_and_shell_command(tmp_path):
+    resume = tmp_path / "space dir" / "resume-metadata.json"
+    resume.parent.mkdir()
     resume.write_text("not json", encoding="utf-8")
     metadata = {
         "resume": {"path": str(resume), "exists": True, "source": "cache"},
@@ -362,8 +364,21 @@ def test_suggested_debug_commands_only_include_existing_metadata(tmp_path):
         },
     }
 
+    actions = suggested_debug_actions(metadata)
+
+    assert actions == [
+        {
+            "kind": "resume_metadata",
+            "metadata_key": "resume",
+            "metadata_path": str(resume),
+            "source": "cache",
+            "reason": "metadata_exists",
+            "argv": ["pdman", "debug", "resume", "--metadata", str(resume)],
+            "command": f"pdman debug resume --metadata '{resume}'",
+        }
+    ]
     assert suggested_debug_commands(metadata) == [
-        f"pdman debug resume --metadata {resume}"
+        f"pdman debug resume --metadata '{resume}'"
     ]
 
 
@@ -421,6 +436,26 @@ def test_records_show_payload_returns_one_task_summary_with_metadata_and_next(tm
         "exists": True,
         "source": "cache",
     }
+    assert payload["suggested_debug"] == [
+        {
+            "kind": "resume_metadata",
+            "metadata_key": "resume",
+            "metadata_path": str(resume),
+            "source": "cache",
+            "reason": "metadata_exists",
+            "argv": ["pdman", "debug", "resume", "--metadata", str(resume)],
+            "command": f"pdman debug resume --metadata {resume}",
+        },
+        {
+            "kind": "dynamic_ranges",
+            "metadata_key": "dynamic_ranges",
+            "metadata_path": str(ranges),
+            "source": "cache",
+            "reason": "metadata_exists",
+            "argv": ["pdman", "debug", "ranges", str(ranges)],
+            "command": f"pdman debug ranges {ranges}",
+        },
+    ]
     assert payload["suggested_commands"] == [
         f"pdman debug resume --metadata {resume}",
         f"pdman debug ranges {ranges}",
@@ -478,3 +513,4 @@ def test_format_record_show_readable_summary(tmp_path):
     assert "resume: missing" in output
     assert "Next:" in output
     assert "No debug metadata found." in output
+    assert payload["suggested_debug"] == []

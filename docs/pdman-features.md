@@ -801,13 +801,24 @@ pdman records show --run-id <run-id> --task-id <task-id> --json
       "source": "cache"
     }
   },
+  "suggested_debug": [
+    {
+      "kind": "resume_metadata",
+      "metadata_key": "resume",
+      "metadata_path": ".../resume-metadata.json",
+      "source": "cache",
+      "reason": "metadata_exists",
+      "argv": ["pdman", "debug", "resume", "--metadata", ".../resume-metadata.json"],
+      "command": "pdman debug resume --metadata .../resume-metadata.json"
+    }
+  ],
   "suggested_commands": [
     "pdman debug resume --metadata ..."
   ]
 }
 ```
 
-`suggested_commands` 只在对应 metadata 文件真实存在时生成；不会假设 metadata 一定存在。`records show` 不读取完整 metadata，不执行 debug 命令，不恢复或修复下载，也不改变 history/run/debug 旧 contract。
+v0.8.4 将 debug bridge 明确为结构化建议而非执行入口。`suggested_debug` 每项包含 `kind`、`metadata_key`、`metadata_path`、`source`、`reason`、`argv` 和 shell-quoted `command`；agent 优先使用 `argv`，人类可直接复制 `command`。`suggested_commands` 作为兼容字段保留，仍只在对应 metadata 文件真实存在时生成。`records show` 不读取完整 metadata，不执行 debug 命令，不恢复或修复下载，也不改变 history/run/debug 旧 contract。
 
 Records 与 history/run 的边界：
 
@@ -817,7 +828,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.3 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.4 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

@@ -279,6 +279,17 @@ def test_cli_records_show_json_outputs_one_task(tmp_path, capsys):
         "error": "HTTP 500",
     }
     assert payload["metadata"]["resume"]["exists"] is True
+    assert payload["suggested_debug"] == [
+        {
+            "kind": "resume_metadata",
+            "metadata_key": "resume",
+            "metadata_path": str(resume),
+            "source": "cache",
+            "reason": "metadata_exists",
+            "argv": ["pdman", "debug", "resume", "--metadata", str(resume)],
+            "command": f"pdman debug resume --metadata {resume}",
+        }
+    ]
     assert payload["suggested_commands"] == [
         f"pdman debug resume --metadata {resume}"
     ]
