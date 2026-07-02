@@ -362,6 +362,8 @@ v0.8.4 起，`records show --json` 额外提供结构化 `suggested_debug` bridg
 
 v0.8.5 起，`pdman records schema` 输出 records surface 的 agent-readable contract，描述 `list`、`metadata`、`show` 的 selector、输出格式、共享 payload 和明确 non-goals。`--surface list|metadata|show` 可聚焦单个 surface；`--json` 供脚本和 agent 读取。
 
+v0.8.6 起，records JSON 的诊断边界更稳定：metadata locator 固定包含 `path`、`exists`、`source`、`status` 和 `reason`；`records metadata` 会用 `skipped/skipped_count` 报告因缺失 URL 无法定位 metadata 的记录；`records show --json` 找不到 task 时返回结构化 `record_not_found` 错误。
+
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 
 ### 本地队列命令

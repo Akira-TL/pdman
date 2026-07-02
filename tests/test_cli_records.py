@@ -371,6 +371,33 @@ def test_cli_records_show_missing_returns_one(tmp_path, capsys):
     assert "Record not found: run-1/missing" in output
 
 
+def test_cli_records_show_missing_json_returns_structured_error(tmp_path, capsys):
+    exit_code = cli.main(
+        [
+            "records",
+            "show",
+            "--run-id",
+            "run-1",
+            "--task-id",
+            "missing",
+            "--json",
+            "--cache-dir",
+            str(tmp_path),
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload == {
+        "error": {
+            "code": "record_not_found",
+            "message": "Record not found: run-1/missing",
+            "run_id": "run-1",
+            "task_id": "missing",
+        }
+    }
+
+
 def test_cli_records_metadata_json_locates_by_url(tmp_path, capsys):
     url = "https://example.com/file.bin"
     url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
@@ -407,12 +434,18 @@ def test_cli_records_metadata_json_locates_by_url(tmp_path, capsys):
         "path": str(metadata_dir / "resume-metadata.json"),
         "exists": False,
         "source": "cache",
+        "status": "missing",
+        "reason": "file_missing",
     }
     assert payload["matches"][0]["metadata"]["dynamic_ranges"] == {
         "path": str(metadata_dir / "dynamic-ranges.json"),
         "exists": True,
         "source": "cache",
+        "status": "available",
+        "reason": None,
     }
+    assert payload["skipped"] == []
+    assert payload["skipped_count"] == 0
 
 
 def test_cli_records_metadata_jsonl_outputs_one_match_per_line(tmp_path, capsys):

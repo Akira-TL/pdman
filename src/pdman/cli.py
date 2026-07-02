@@ -204,7 +204,18 @@ def handle_records_show_command(argv=None) -> int:
         task_id=args.task_id,
     )
     if payload is None:
-        print(f"Record not found: {args.run_id}/{args.task_id}")
+        error_payload = {
+            "error": {
+                "code": "record_not_found",
+                "message": f"Record not found: {args.run_id}/{args.task_id}",
+                "run_id": args.run_id,
+                "task_id": args.task_id,
+            }
+        }
+        if args.json:
+            print_json(error_payload)
+            return 1
+        print(error_payload["error"]["message"])
         return 1
     if args.json:
         print_json(payload)

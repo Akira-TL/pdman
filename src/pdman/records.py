@@ -59,10 +59,30 @@ def _metadata_dir_for_url(cache_dir: str | None, url: str) -> Path:
 
 
 def _metadata_file_payload(path: Path) -> dict[str, Any]:
+    exists = path.exists()
     return {
         "path": str(path),
-        "exists": path.exists(),
+        "exists": exists,
         "source": "cache",
+        "status": "available" if exists else "missing",
+        "reason": None if exists else "file_missing",
+    }
+
+
+def _unavailable_metadata_file_payload(reason: str) -> dict[str, Any]:
+    return {
+        "path": None,
+        "exists": False,
+        "source": "cache",
+        "status": "unavailable",
+        "reason": reason,
+    }
+
+
+def unavailable_metadata_locator(reason: str) -> dict[str, Any]:
+    return {
+        "resume": _unavailable_metadata_file_payload(reason),
+        "dynamic_ranges": _unavailable_metadata_file_payload(reason),
     }
 
 
@@ -168,8 +188,8 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
         "commands": commands,
         "shared_payloads": {
             "metadata_locator": {
-                "resume": ["path", "exists", "source"],
-                "dynamic_ranges": ["path", "exists", "source"],
+                "resume": ["path", "exists", "source", "status", "reason"],
+                "dynamic_ranges": ["path", "exists", "source", "status", "reason"],
             },
             "debug_action": [
                 "kind",
@@ -242,6 +262,15 @@ def _metadata_match(
     }
 
 
+def _metadata_skip(record: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "run_id": record.get("run_id"),
+        "task_id": record.get("task_id"),
+        "target_path": _record_target(record),
+        "reason": reason,
+    }
+
+
 def records_metadata_payload(
     cache_dir: str | None = None,
     *,
@@ -260,11 +289,14 @@ def records_metadata_payload(
         target=target,
         run_id=run_id,
     )
-    matches = [
-        match
-        for record in records
-        if (match := _metadata_match(record, cache_dir)) is not None
-    ]
+    matches: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for record in records:
+        match = _metadata_match(record, cache_dir)
+        if match is not None:
+            matches.append(match)
+        else:
+            skipped.append(_metadata_skip(record, "url_missing"))
     if url is not None and not matches:
         synthetic = _metadata_match({}, cache_dir, url_override=url)
         if synthetic is not None:
@@ -273,6 +305,8 @@ def records_metadata_payload(
         "query": query,
         "matches": matches,
         "count": len(matches),
+        "skipped": skipped,
+        "skipped_count": len(skipped),
     }
 
 
@@ -344,11 +378,18 @@ def records_show_payload(
     payload = record_summary(record)
     payload["error"] = _record_error_payload(record)
     url = record.get("url")
-    metadata = metadata_locator(cache_dir, url) if isinstance(url, str) and url else {}
-    payload["metadata"] = metadata
+    url_present = isinstance(url, str) and bool(url)
+    metadata = metadata_locator(cache_dir, url) if url_present else unavailable_metadata_locator("url_missing")
     actions = suggested_debug_actions(metadata)
+    payload["metadata"] = metadata
     payload["suggested_debug"] = actions
     payload["suggested_commands"] = [action["command"] for action in actions]
+    payload["diagnostics"] = {
+        "record_found": True,
+        "url_present": url_present,
+        "metadata_locator": "derived_from_url" if url_present else "unavailable_url_missing",
+        "suggested_debug_count": len(actions),
+    }
     return payload
 
 
@@ -519,4 +560,5 @@ __all__ = [
     "records_show_payload",
     "suggested_debug_actions",
     "suggested_debug_commands",
+    "unavailable_metadata_locator",
 ]

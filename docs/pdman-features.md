@@ -837,6 +837,14 @@ pdman records schema --surface show --json
 
 `records schema` 输出 records surface 的机器可读 contract，包括 `list`、`metadata`、`show` 的 selector、输出格式、共享 payload 和 non-goals。默认 `--surface all` 输出全部 surface；`--surface list|metadata|show` 只输出单个 surface。readable 输出面向人工快速确认；`--json` 用于脚本和 agent。
 
+v0.8.6 稳定 records diagnostics 边界：
+
+- `metadata_locator.resume` 与 `metadata_locator.dynamic_ranges` 固定包含 `path`、`exists`、`source`、`status`、`reason`。
+- metadata 文件存在时 `status=available`，不存在时 `status=missing reason=file_missing`。
+- record 缺失 URL 时，`records show` 使用 `status=unavailable reason=url_missing` 的固定 locator 结构，而不是返回空对象。
+- `records metadata` 对匹配到但缺失 URL 的 record 输出 `skipped` 和 `skipped_count`。
+- `records show --json` 找不到 task 时输出结构化 `{error: {code, message, run_id, task_id}}`，readable 输出保持原来的简短错误文本。
+
 Records 与 history/run 的边界：
 
 | Surface | 定位 |
@@ -845,7 +853,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.5 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.6 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

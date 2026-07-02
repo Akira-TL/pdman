@@ -227,11 +227,15 @@ def test_metadata_locator_derives_cache_paths_without_reading_content(tmp_path):
             "path": str(metadata_dir / "resume-metadata.json"),
             "exists": True,
             "source": "cache",
+            "status": "available",
+            "reason": None,
         },
         "dynamic_ranges": {
             "path": str(metadata_dir / "dynamic-ranges.json"),
             "exists": False,
             "source": "cache",
+            "status": "missing",
+            "reason": "file_missing",
         },
     }
 
@@ -275,7 +279,11 @@ def test_records_metadata_payload_matches_url_history_records(tmp_path):
         "path": str(metadata_dir / "resume-metadata.json"),
         "exists": True,
         "source": "cache",
+        "status": "available",
+        "reason": None,
     }
+    assert payload["skipped"] == []
+    assert payload["skipped_count"] == 0
 
 
 def test_records_metadata_payload_can_synthesize_url_only_locator(tmp_path):
@@ -318,7 +326,7 @@ def test_records_metadata_payload_filters_by_target_and_run_id(tmp_path):
     assert [match["task_id"] for match in run_payload["matches"]] == ["task-1"]
 
 
-def test_records_metadata_payload_skips_records_without_url(tmp_path):
+def test_records_metadata_payload_reports_skipped_records_without_url(tmp_path):
     write_history(
         tmp_path,
         [
@@ -335,6 +343,15 @@ def test_records_metadata_payload_skips_records_without_url(tmp_path):
 
     assert payload["count"] == 0
     assert payload["matches"] == []
+    assert payload["skipped"] == [
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "target_path": "/downloads/a.bin",
+            "reason": "url_missing",
+        }
+    ]
+    assert payload["skipped_count"] == 1
 
 
 def test_format_records_metadata_readable_summary(tmp_path):
@@ -366,8 +383,8 @@ def test_records_schema_payload_describes_all_records_surfaces():
     assert payload["commands"]["metadata"]["selector_mode"] == "exactly_one_required"
     assert payload["commands"]["show"]["json_shape"]["suggested_debug"] == "list[debug_action]"
     assert payload["shared_payloads"]["metadata_locator"] == {
-        "resume": ["path", "exists", "source"],
-        "dynamic_ranges": ["path", "exists", "source"],
+        "resume": ["path", "exists", "source", "status", "reason"],
+        "dynamic_ranges": ["path", "exists", "source", "status", "reason"],
     }
     assert "database_index_engine" in payload["non_goals"]
 
@@ -468,11 +485,21 @@ def test_records_show_payload_returns_one_task_summary_with_metadata_and_next(tm
         "path": str(resume),
         "exists": True,
         "source": "cache",
+        "status": "available",
+        "reason": None,
     }
     assert payload["metadata"]["dynamic_ranges"] == {
         "path": str(ranges),
         "exists": True,
         "source": "cache",
+        "status": "available",
+        "reason": None,
+    }
+    assert payload["diagnostics"] == {
+        "record_found": True,
+        "url_present": True,
+        "metadata_locator": "derived_from_url",
+        "suggested_debug_count": 2,
     }
     assert payload["suggested_debug"] == [
         {
@@ -498,6 +525,48 @@ def test_records_show_payload_returns_one_task_summary_with_metadata_and_next(tm
         f"pdman debug resume --metadata {resume}",
         f"pdman debug ranges {ranges}",
     ]
+
+
+def test_records_show_payload_stabilizes_metadata_when_url_is_missing(tmp_path):
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "task_id": "task-1",
+                "filename": "file.bin",
+                "status": "failed",
+            }
+        ],
+    )
+
+    payload = records_show_payload(str(tmp_path), run_id="run-1", task_id="task-1")
+
+    assert payload is not None
+    assert payload["metadata"] == {
+        "resume": {
+            "path": None,
+            "exists": False,
+            "source": "cache",
+            "status": "unavailable",
+            "reason": "url_missing",
+        },
+        "dynamic_ranges": {
+            "path": None,
+            "exists": False,
+            "source": "cache",
+            "status": "unavailable",
+            "reason": "url_missing",
+        },
+    }
+    assert payload["diagnostics"] == {
+        "record_found": True,
+        "url_present": False,
+        "metadata_locator": "unavailable_url_missing",
+        "suggested_debug_count": 0,
+    }
+    assert payload["suggested_debug"] == []
+    assert payload["suggested_commands"] == []
 
 
 def test_records_show_payload_returns_none_for_missing_task(tmp_path):
