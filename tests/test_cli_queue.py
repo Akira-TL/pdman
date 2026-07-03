@@ -234,6 +234,35 @@ def test_cli_queue_add_schema_v2_dry_run_json_does_not_write_queue(tmp_path, cap
     assert not queue_path(str(tmp_path)).exists()
 
 
+def test_cli_queue_add_schema_v2_dry_run_json_reports_error_code(tmp_path, capsys):
+    task_file = tmp_path / "tasks.yaml"
+    task_file.write_text("version: 2\ndefaults: []\n")
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "add",
+            "--cache-dir",
+            str(tmp_path),
+            "-i",
+            str(task_file),
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload == {
+        "error": {
+            "code": "schema_v2_defaults_not_mapping",
+            "message": "schema v2 defaults must be a mapping",
+            "field": "defaults",
+        }
+    }
+    assert not queue_path(str(tmp_path)).exists()
+
+
 def test_cli_queue_add_schema_v2_rejects_unknown_group(tmp_path, capsys):
     task_file = tmp_path / "tasks.yaml"
     task_file.write_text("version: 2\ngroups:\n  nt-db:\n    tasks: []\n")
@@ -253,6 +282,7 @@ def test_cli_queue_add_schema_v2_rejects_unknown_group(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert exit_code == 1
+    assert "[schema_v2_group_not_found]" in output
     assert "group not found" in output
     assert not queue_path(str(tmp_path)).exists()
 

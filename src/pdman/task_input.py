@@ -12,6 +12,35 @@ _TASK_FIELDS = {"url", "file_name", "dir_path", "md5", "log_path"}
 _RESERVED_SCHEMA_V2_FIELDS = {"version", "defaults", "groups", "tasks"}
 
 
+class TaskInputError(ValueError):
+    def __init__(self, code: str, message: str, *, field: str | None = None):
+        self.code = code
+        self.message = message
+        self.field = field
+        super().__init__(message)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = {"code": self.code, "message": self.message}
+        if self.field is not None:
+            payload["field"] = self.field
+        return payload
+
+
+def task_input_error_payload(exc: ValueError) -> dict[str, Any]:
+    if isinstance(exc, TaskInputError):
+        return exc.to_dict()
+    return {"code": "task_input_invalid", "message": str(exc)}
+
+
+def format_task_input_error(exc: ValueError) -> str:
+    payload = task_input_error_payload(exc)
+    return f"[{payload['code']}] {payload['message']}"
+
+
+def _task_input_error(code: str, message: str, *, field: str | None = None) -> TaskInputError:
+    return TaskInputError(code, message, field=field)
+
+
 @dataclass
 class TaskInput:
     url: str
@@ -40,7 +69,11 @@ class TaskInput:
 def _task_from_mapping(data: dict[str, Any], *, group: str | None = None) -> TaskInput:
     url = data.get("url")
     if not url:
-        raise ValueError("Task mapping in a list must include a url field")
+        raise _task_input_error(
+            "task_mapping_url_missing",
+            "Task mapping in a list must include a url field",
+            field="url",
+        )
     options = {
         key: value
         for key, value in data.items()
@@ -63,7 +96,10 @@ def _from_mapping(data: dict[str, Any]) -> list[TaskInput]:
         if value is None:
             value = {}
         if not isinstance(value, dict):
-            raise ValueError(f"Task options for {url} must be a mapping")
+            raise _task_input_error(
+                "task_options_not_mapping",
+                f"Task options for {url} must be a mapping",
+            )
         options = {
             key: option_value
             for key, option_value in value.items()
@@ -90,7 +126,10 @@ def _from_sequence(data: list[Any], *, group: str | None = None) -> list[TaskInp
         elif isinstance(value, dict):
             tasks.append(_task_from_mapping(value, group=group))
         else:
-            raise ValueError("Task list entries must be strings or mappings")
+            raise _task_input_error(
+                "task_entry_invalid_type",
+                "Task list entries must be strings or mappings",
+            )
     return tasks
 
 
@@ -107,7 +146,18 @@ def _mapping_or_empty(value: Any, *, field_name: str) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ValueError(f"schema v2 {field_name} must be a mapping")
+        code_field = field_name.split(".")[-1]
+        if code_field == "defaults":
+            code = "schema_v2_defaults_not_mapping"
+        elif code_field == "groups":
+            code = "schema_v2_groups_not_mapping"
+        else:
+            code = "schema_v2_group_not_mapping"
+        raise _task_input_error(
+            code,
+            f"schema v2 {field_name} must be a mapping",
+            field=field_name,
+        )
     return value
 
 
@@ -115,7 +165,12 @@ def _tasks_sequence(value: Any, *, field_name: str) -> list[Any]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise ValueError(f"schema v2 {field_name} must be a list")
+        code = "schema_v2_group_tasks_not_list" if "." in field_name else "schema_v2_tasks_not_list"
+        raise _task_input_error(
+            code,
+            f"schema v2 {field_name} must be a list",
+            field=field_name,
+        )
     return value
 
 
@@ -133,7 +188,10 @@ def _merge_task_options(
     if isinstance(task_data, dict):
         resolved.update(task_data)
         return resolved
-    raise ValueError("schema v2 task entries must be strings or mappings")
+    raise _task_input_error(
+        "schema_v2_task_entry_invalid_type",
+        "schema v2 task entries must be strings or mappings",
+    )
 
 
 def _from_schema_v2(data: dict[str, Any], *, group: str | None = None) -> list[TaskInput]:
@@ -143,7 +201,11 @@ def _from_schema_v2(data: dict[str, Any], *, group: str | None = None) -> list[T
 
     if group is not None:
         if group not in groups:
-            raise ValueError(f"schema v2 group not found: {group}")
+            raise _task_input_error(
+                "schema_v2_group_not_found",
+                f"schema v2 group not found: {group}",
+                field="group",
+            )
         group_data = _mapping_or_empty(groups[group], field_name=f"groups.{group}")
         group_defaults = {
             key: value for key, value in group_data.items() if key != "tasks"
@@ -186,15 +248,30 @@ def parse_task_data(data: Any, *, group: str | None = None) -> list[TaskInput]:
         if _is_schema_v2(data):
             return _from_schema_v2(data, group=group)
         if _has_schema_v2_shape(data):
-            raise ValueError("schema v2 task input must set version: 2")
+            raise _task_input_error(
+                "schema_v2_missing_version",
+                "schema v2 task input must set version: 2",
+                field="version",
+            )
         if group is not None:
-            raise ValueError("--group requires schema v2 task input")
+            raise _task_input_error(
+                "group_requires_schema_v2",
+                "--group requires schema v2 task input",
+                field="group",
+            )
         return _from_mapping(data)
     if isinstance(data, list):
         if group is not None:
-            raise ValueError("--group requires schema v2 task input")
+            raise _task_input_error(
+                "group_requires_schema_v2",
+                "--group requires schema v2 task input",
+                field="group",
+            )
         return _from_sequence(data)
-    raise ValueError("Task input data must be a mapping or list")
+    raise _task_input_error(
+        "task_input_invalid_type",
+        "Task input data must be a mapping or list",
+    )
 
 
 def list_task_groups_from_data(data: Any) -> list[str]:
@@ -264,6 +341,17 @@ def task_input_schema_payload() -> dict[str, Any]:
                 "other_fields": "preserved in TaskInput.options for dry-run and future contract expansion",
             },
             "precedence": ["task", "group", "defaults"],
+            "validation_errors": {
+                "schema_v2_missing_version": "schema-like input must explicitly set version: 2",
+                "schema_v2_defaults_not_mapping": "defaults must be a mapping",
+                "schema_v2_groups_not_mapping": "groups must be a mapping",
+                "schema_v2_group_not_mapping": "each group value must be a mapping",
+                "schema_v2_tasks_not_list": "top-level tasks must be a list",
+                "schema_v2_group_tasks_not_list": "group tasks must be a list",
+                "task_mapping_url_missing": "task mapping must include url",
+                "schema_v2_group_not_found": "requested group does not exist",
+                "group_requires_schema_v2": "--group requires schema v2 input",
+            },
             "selection": {
                 "main_cli": "pdman -i tasks.yaml --group NAME",
                 "queue_add": "pdman queue add -i tasks.yaml --group NAME",
@@ -315,6 +403,9 @@ def format_task_input_schema(payload: dict[str, Any]) -> str:
     lines.append("    task_fields:")
     for name, description in schema_v2["task_fields"].items():
         lines.append(f"      {name}: {description}")
+    lines.append("    validation_errors:")
+    for code, description in schema_v2["validation_errors"].items():
+        lines.append(f"      {code}: {description}")
     lines.append("    precedence: " + " > ".join(schema_v2["precedence"]))
     lines.append("  mapped_fields: " + ", ".join(payload["mapped_fields"]))
     lines.append(f"  preserved_option_fields: {payload['preserved_option_fields']}")

@@ -68,9 +68,11 @@ from .resume_metadata_inspect import (
 from .runtime import default_cache_root, default_system_tmp_root
 from .task_input import (
     TaskInput,
+    format_task_input_error,
     format_task_input_schema,
     load_task_groups,
     load_task_input,
+    task_input_error_payload,
     task_input_schema_payload,
 )
 
@@ -442,7 +444,11 @@ def handle_queue_add_command(argv=None) -> int:
         for input_file in args.input_file:
             tasks.extend(load_task_input(input_file, group=args.group))
     except ValueError as exc:
-        print(f"Failed to resolve queue input tasks: {exc}")
+        error = task_input_error_payload(exc)
+        if args.json:
+            print_json({"error": error})
+        else:
+            print(f"Failed to resolve queue input tasks: {format_task_input_error(exc)}")
         return 1
 
     for index, url in enumerate(args.urls):
@@ -1193,7 +1199,7 @@ def main(argv=None):
             _print_dry_run_tasks(_collect_dry_run_tasks(args))
             return 0
         except ValueError as exc:
-            print(f"Failed to resolve input tasks: {exc}")
+            print(f"Failed to resolve input tasks: {format_task_input_error(exc)}")
             return 1
     if args.log == "-":
         args.log = sys.stdout

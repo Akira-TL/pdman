@@ -124,6 +124,19 @@ def test_cli_dry_run_resolves_schema_v2_group_without_downloading(tmp_path, caps
     assert "refseq" not in output
 
 
+def test_cli_dry_run_reports_schema_v2_error_code(tmp_path, capsys):
+    path = tmp_path / "tasks.yaml"
+    path.write_text("version: 2\ndefaults: []\n")
+
+    exit_code = cli.main(["-i", str(path), "--dry-run"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Failed to resolve input tasks:" in output
+    assert "[schema_v2_defaults_not_mapping]" in output
+    assert "defaults must be a mapping" in output
+
+
 def test_cli_passes_group_to_manager_input_loading(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "Manager", StubManager)
     path = tmp_path / "tasks.yaml"

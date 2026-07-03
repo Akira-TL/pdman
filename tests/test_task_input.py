@@ -2,10 +2,13 @@ import json
 
 from pdman.task_input import (
     TaskInput,
+    TaskInputError,
+    format_task_input_error,
     format_task_input_schema,
     load_task_groups,
     load_task_input,
     parse_task_data,
+    task_input_error_payload,
     task_input_schema_payload,
 )
 
@@ -159,10 +162,43 @@ def test_parse_yaml_schema_v2_can_select_one_group():
 def test_parse_yaml_schema_v2_rejects_unknown_group():
     try:
         parse_task_data({"version": 2, "groups": {}}, group="missing")
-    except ValueError as exc:
+    except TaskInputError as exc:
+        assert exc.code == "schema_v2_group_not_found"
         assert "group not found" in str(exc)
     else:
         raise AssertionError("expected unknown schema v2 group to be rejected")
+
+
+def test_task_input_error_payload_and_format_are_stable():
+    error = TaskInputError("schema_v2_defaults_not_mapping", "defaults must be a mapping", field="defaults")
+
+    assert task_input_error_payload(error) == {
+        "code": "schema_v2_defaults_not_mapping",
+        "message": "defaults must be a mapping",
+        "field": "defaults",
+    }
+    assert format_task_input_error(error) == "[schema_v2_defaults_not_mapping] defaults must be a mapping"
+
+
+def test_schema_v2_validation_error_codes():
+    cases = [
+        ({"defaults": {}}, None, "schema_v2_missing_version"),
+        ({"version": 2, "defaults": []}, None, "schema_v2_defaults_not_mapping"),
+        ({"version": 2, "groups": []}, None, "schema_v2_groups_not_mapping"),
+        ({"version": 2, "tasks": {}}, None, "schema_v2_tasks_not_list"),
+        ({"version": 2, "groups": {"nt-db": []}}, None, "schema_v2_group_not_mapping"),
+        ({"version": 2, "groups": {"nt-db": {"tasks": {}}}}, None, "schema_v2_group_tasks_not_list"),
+        ({"version": 2, "tasks": [{}]}, None, "task_mapping_url_missing"),
+        ([{"url": "https://example.com/a.bin"}], "nt-db", "group_requires_schema_v2"),
+    ]
+
+    for data, group, expected_code in cases:
+        try:
+            parse_task_data(data, group=group)
+        except TaskInputError as exc:
+            assert exc.code == expected_code
+        else:
+            raise AssertionError(f"expected {expected_code}")
 
 
 def test_task_input_schema_payload_contract():
@@ -173,6 +209,8 @@ def test_task_input_schema_payload_contract():
     assert payload["introduced_in"] == "0.8.19"
     assert payload["schema_v2"]["version"] == 2
     assert payload["schema_v2"]["precedence"] == ["task", "group", "defaults"]
+    assert payload["schema_v2"]["validation_errors"]["schema_v2_defaults_not_mapping"] == "defaults must be a mapping"
+    assert payload["schema_v2"]["validation_errors"]["task_mapping_url_missing"] == "task mapping must include url"
     assert payload["mapped_fields"] == ["url", "file_name", "dir_path", "md5", "log_path"]
     assert "does not change queue record schema v1" in payload["non_goals"]
     assert "does not write TaskInput.options to queue records" in payload["non_goals"]
@@ -184,6 +222,7 @@ def test_format_task_input_schema_readable_contract():
     assert "Task input schema:" in output
     assert "schema_v2:" in output
     assert "precedence: task > group > defaults" in output
+    assert "schema_v2_defaults_not_mapping: defaults must be a mapping" in output
     assert "mapped_fields: url, file_name, dir_path, md5, log_path" in output
     assert "does not change queue record schema v1" in output
 

@@ -988,6 +988,8 @@ v0.8.18 起，`queue add` 支持 YAML schema v2 的 group 入口：`--list-group
 
 v0.8.19 起，`pdman input schema` 提供输入格式 contract inspection；`--json` 输出供脚本和 agent 读取。该命令只描述 legacy 输入、YAML schema v2 字段、优先级、mapped fields、preserved option fields 和 non-goals；不会读取具体 input file、不会启动下载、不会写 queue。
 
+v0.8.20 起，YAML schema v2 解析错误会带稳定 reason code，例如 `schema_v2_missing_version`、`schema_v2_defaults_not_mapping`、`schema_v2_group_not_found` 和 `task_mapping_url_missing`。main CLI `--dry-run` 的错误会显示 `[code] message`；`queue add --json` 解析失败时会输出 `{ "error": { "code", "message", "field" } }`，且不会写 queue。
+
 queue record schema：
 
 ```json
