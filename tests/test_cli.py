@@ -1,3 +1,5 @@
+import json
+
 import pdman.cli as cli
 
 
@@ -33,6 +35,34 @@ def test_cli_returns_manager_exit_code(monkeypatch):
     exit_code = cli.main(["https://example.com/file.bin"])
 
     assert exit_code == 1
+
+
+def test_cli_input_schema_json(capsys):
+    exit_code = cli.main(["input", "schema", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["surface"] == "task_input"
+    assert payload["schema_v2"]["precedence"] == ["task", "group", "defaults"]
+    assert payload["mapped_fields"] == ["url", "file_name", "dir_path", "md5", "log_path"]
+
+
+def test_cli_input_schema_readable(capsys):
+    exit_code = cli.main(["input", "schema"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Task input schema:" in output
+    assert "precedence: task > group > defaults" in output
+    assert "does not write TaskInput.options to queue records" in output
+
+
+def test_cli_input_requires_schema(capsys):
+    exit_code = cli.main(["input"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Input command required: schema" in output
 
 
 def test_cli_list_groups_for_schema_v2_input(tmp_path, capsys):

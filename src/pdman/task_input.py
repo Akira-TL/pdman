@@ -222,3 +222,103 @@ def load_task_input(input_file: str, *, group: str | None = None) -> list[TaskIn
 
 def load_task_groups(input_file: str) -> list[str]:
     return list_task_groups_from_data(_load_structured_file(input_file))
+
+
+def task_input_schema_payload() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "surface": "task_input",
+        "introduced_in": "0.8.19",
+        "commands": {
+            "input schema": {
+                "introduced_in": "0.8.19",
+                "outputs": ["readable", "json"],
+                "purpose": "Describe task input formats and YAML schema v2 boundaries without reading task files or downloading.",
+            }
+        },
+        "legacy_formats": {
+            "plain_text": "one URL per non-empty line",
+            "json_mapping": "{url: task_options}",
+            "json_list": "list[str|task_mapping]",
+            "yaml_mapping": "{url: task_options}",
+            "yaml_list": "list[str|task_mapping]",
+        },
+        "schema_v2": {
+            "version": 2,
+            "top_level_fields": {
+                "version": "required literal 2",
+                "defaults": "optional mapping applied to every task",
+                "tasks": "optional top-level list[str|task_mapping]",
+                "groups": "optional mapping of group name to group config",
+            },
+            "group_fields": {
+                "tasks": "optional list[str|task_mapping]",
+                "other_fields": "group defaults merged between global defaults and task fields",
+            },
+            "task_fields": {
+                "url": "required for task mappings; string task entries are treated as url",
+                "file_name": "mapped to TaskInput.file_name and current download/queue records",
+                "dir_path": "mapped to TaskInput.dir_path and current download/queue records",
+                "md5": "mapped to TaskInput.md5 and current download/queue records",
+                "log_path": "mapped to TaskInput.log_path for direct downloads",
+                "other_fields": "preserved in TaskInput.options for dry-run and future contract expansion",
+            },
+            "precedence": ["task", "group", "defaults"],
+            "selection": {
+                "main_cli": "pdman -i tasks.yaml --group NAME",
+                "queue_add": "pdman queue add -i tasks.yaml --group NAME",
+                "list_groups": [
+                    "pdman -i tasks.yaml --list-groups",
+                    "pdman queue add -i tasks.yaml --list-groups",
+                ],
+                "dry_run": [
+                    "pdman -i tasks.yaml --group NAME --dry-run",
+                    "pdman queue add -i tasks.yaml --group NAME --dry-run",
+                ],
+            },
+        },
+        "mapped_fields": ["url", "file_name", "dir_path", "md5", "log_path"],
+        "preserved_option_fields": "schema v2 fields other than mapped fields and reserved structural fields are preserved in TaskInput.options",
+        "non_goals": [
+            "does not map retry, headers, max_connections, or connect_timeout to per-task downloader behavior",
+            "does not change queue record schema v1",
+            "does not write TaskInput.options to queue records",
+            "does not start downloads or inspect task files",
+            "does not introduce database or index storage",
+        ],
+    }
+
+
+def format_task_input_schema(payload: dict[str, Any]) -> str:
+    schema_v2 = payload["schema_v2"]
+    lines = [
+        "Task input schema:",
+        f"  schema_version: {payload['schema_version']}",
+        f"  surface: {payload['surface']}",
+        f"  introduced_in: {payload['introduced_in']}",
+        "  legacy_formats:",
+    ]
+    for name, description in payload["legacy_formats"].items():
+        lines.append(f"    {name}: {description}")
+    lines.extend(
+        [
+            "  schema_v2:",
+            f"    version: {schema_v2['version']}",
+            "    top_level_fields:",
+        ]
+    )
+    for name, description in schema_v2["top_level_fields"].items():
+        lines.append(f"      {name}: {description}")
+    lines.append("    group_fields:")
+    for name, description in schema_v2["group_fields"].items():
+        lines.append(f"      {name}: {description}")
+    lines.append("    task_fields:")
+    for name, description in schema_v2["task_fields"].items():
+        lines.append(f"      {name}: {description}")
+    lines.append("    precedence: " + " > ".join(schema_v2["precedence"]))
+    lines.append("  mapped_fields: " + ", ".join(payload["mapped_fields"]))
+    lines.append(f"  preserved_option_fields: {payload['preserved_option_fields']}")
+    lines.append("  non_goals:")
+    for item in payload["non_goals"]:
+        lines.append(f"    - {item}")
+    return "\n".join(lines)

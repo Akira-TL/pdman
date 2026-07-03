@@ -145,7 +145,7 @@ pdman -i tasks.yaml --group nt-db --dry-run
 pdman -i tasks.yaml --group nt-db
 ```
 
-schema v2 的 `file_name`、`dir_path`、`md5`、`log_path` 会进入实际 task；其他字段会先保存在解析后的 `options` 中，当前版本不把它们映射成 per-task 下载行为。
+schema v2 的 `file_name`、`dir_path`、`md5`、`log_path` 会进入实际 task；其他字段会先保存在解析后的 `options` 中，当前版本不把它们映射成 per-task 下载行为。v0.8.19 起，可用 `pdman input schema` 或 `pdman input schema --json` 查看输入格式和 YAML schema v2 的稳定 contract。
 
 ---
 
@@ -471,6 +471,8 @@ pdman queue clear --all --json
 ```
 
 v0.8.18 起，`queue add` 支持 YAML schema v2 的 group 入口：`--list-groups` 只列出 groups，不写 queue；`--dry-run` 只预览将要入队的 records，不写 queue；`--group NAME` 只解析指定 group。queue record schema 仍保持 v1，不保存 `TaskInput.options`，也不把 schema v2 的 `retry`、`headers` 等额外字段映射到 queue record。
+
+v0.8.19 起，`pdman input schema` 提供输入格式 contract inspection；`--json` 输出供脚本和 agent 读取。该命令只描述 legacy 输入、YAML schema v2 字段、优先级、mapped fields、preserved option fields 和 non-goals；不会读取具体 input file、不会启动下载、不会写 queue。
 
 队列文件位于 `~/.cache/pdman/queue.jsonl`。`queue start` 会读取 `pending` 任务，使用真实 `Manager` 执行下载，并把队列状态更新为 `completed`、`skipped` 或 `failed`。
 

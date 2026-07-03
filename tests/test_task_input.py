@@ -1,6 +1,13 @@
 import json
 
-from pdman.task_input import TaskInput, load_task_groups, load_task_input, parse_task_data
+from pdman.task_input import (
+    TaskInput,
+    format_task_input_schema,
+    load_task_groups,
+    load_task_input,
+    parse_task_data,
+    task_input_schema_payload,
+)
 
 
 def test_parse_mapping_task_data():
@@ -156,6 +163,29 @@ def test_parse_yaml_schema_v2_rejects_unknown_group():
         assert "group not found" in str(exc)
     else:
         raise AssertionError("expected unknown schema v2 group to be rejected")
+
+
+def test_task_input_schema_payload_contract():
+    payload = task_input_schema_payload()
+
+    assert payload["schema_version"] == 1
+    assert payload["surface"] == "task_input"
+    assert payload["introduced_in"] == "0.8.19"
+    assert payload["schema_v2"]["version"] == 2
+    assert payload["schema_v2"]["precedence"] == ["task", "group", "defaults"]
+    assert payload["mapped_fields"] == ["url", "file_name", "dir_path", "md5", "log_path"]
+    assert "does not change queue record schema v1" in payload["non_goals"]
+    assert "does not write TaskInput.options to queue records" in payload["non_goals"]
+
+
+def test_format_task_input_schema_readable_contract():
+    output = format_task_input_schema(task_input_schema_payload())
+
+    assert "Task input schema:" in output
+    assert "schema_v2:" in output
+    assert "precedence: task > group > defaults" in output
+    assert "mapped_fields: url, file_name, dir_path, md5, log_path" in output
+    assert "does not change queue record schema v1" in output
 
 
 def test_load_yaml_schema_v2_groups(tmp_path):

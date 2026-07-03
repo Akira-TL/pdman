@@ -66,7 +66,13 @@ from .resume_metadata_inspect import (
     resume_metadata_summary,
 )
 from .runtime import default_cache_root, default_system_tmp_root
-from .task_input import TaskInput, load_task_groups, load_task_input
+from .task_input import (
+    TaskInput,
+    format_task_input_schema,
+    load_task_groups,
+    load_task_input,
+    task_input_schema_payload,
+)
 
 
 def get_version() -> str:
@@ -153,6 +159,30 @@ def _print_queue_add_dry_run(records) -> None:
         file_name = record.file_name or "-"
         dir_path = record.dir_path or "-"
         print(f"  {record.url} file_name={file_name} dir_path={dir_path}")
+
+
+def handle_input_schema_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman input schema")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    payload = task_input_schema_payload()
+    if args.json:
+        print_json(payload)
+        return 0
+    print(format_task_input_schema(payload))
+    return 0
+
+
+def handle_input_command(argv=None) -> int:
+    argv = list(argv or [])
+    if not argv:
+        print("Input command required: schema")
+        return 1
+    command, rest = argv[0], argv[1:]
+    if command == "schema":
+        return handle_input_schema_command(rest)
+    print(f"Unknown input command: {command}")
+    return 1
 
 
 def handle_history_command(argv=None) -> int:
@@ -842,6 +872,8 @@ def handle_subcommand(argv=None) -> int:
         return handle_runs_command(rest)
     if command == "run":
         return handle_run_command(rest)
+    if command == "input":
+        return handle_input_command(rest)
     if command == "queue":
         return handle_queue_command(rest)
     if command == "debug":
@@ -853,7 +885,7 @@ def handle_subcommand(argv=None) -> int:
 
 def main(argv=None):
     argv = list(argv) if argv is not None else sys.argv[1:]
-    if argv and argv[0] in {"history", "runs", "run", "queue", "debug", "records"}:
+    if argv and argv[0] in {"history", "runs", "run", "input", "queue", "debug", "records"}:
         return handle_subcommand(argv)
 
     parser = argparse.ArgumentParser()
