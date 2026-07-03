@@ -86,6 +86,177 @@ def test_cli_queue_add_input_file(tmp_path):
     assert records[0].dir_path == str(tmp_path / "downloads")
 
 
+def test_cli_queue_add_schema_v2_group(tmp_path):
+    task_file = tmp_path / "tasks.yaml"
+    task_file.write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "defaults:",
+                f"  dir_path: {tmp_path / 'default'}",
+                "groups:",
+                "  nt-db:",
+                f"    dir_path: {tmp_path / 'nt'}",
+                "    tasks:",
+                "      - url: https://example.com/nt.tar.gz",
+                "        file_name: nt.tar.gz",
+                "  refseq:",
+                "    tasks:",
+                "      - url: https://example.com/refseq.tar.gz",
+            ]
+        )
+    )
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "add",
+            "--cache-dir",
+            str(tmp_path),
+            "-i",
+            str(task_file),
+            "--group",
+            "nt-db",
+        ]
+    )
+
+    records = load_queue(str(tmp_path))
+    assert exit_code == 0
+    assert len(records) == 1
+    assert records[0].url == "https://example.com/nt.tar.gz"
+    assert records[0].file_name == "nt.tar.gz"
+    assert records[0].dir_path == str(tmp_path / "nt")
+
+
+def test_cli_queue_add_schema_v2_list_groups(tmp_path, capsys):
+    task_file = tmp_path / "tasks.yaml"
+    task_file.write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "groups:",
+                "  nt-db:",
+                "    tasks: []",
+                "  refseq:",
+                "    tasks: []",
+            ]
+        )
+    )
+
+    exit_code = cli.main(
+        ["queue", "add", "--cache-dir", str(tmp_path), "-i", str(task_file), "--list-groups"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Groups:" in output
+    assert "  nt-db" in output
+    assert "  refseq" in output
+    assert not queue_path(str(tmp_path)).exists()
+
+
+def test_cli_queue_add_schema_v2_list_groups_json(tmp_path, capsys):
+    task_file = tmp_path / "tasks.yaml"
+    task_file.write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "groups:",
+                "  nt-db:",
+                "    tasks: []",
+                "  refseq:",
+                "    tasks: []",
+            ]
+        )
+    )
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "add",
+            "--cache-dir",
+            str(tmp_path),
+            "-i",
+            str(task_file),
+            "--list-groups",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {"groups": ["nt-db", "refseq"], "count": 2}
+    assert not queue_path(str(tmp_path)).exists()
+
+
+def test_cli_queue_add_schema_v2_dry_run_json_does_not_write_queue(tmp_path, capsys):
+    task_file = tmp_path / "tasks.yaml"
+    task_file.write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "defaults:",
+                "  retry: 5",
+                "groups:",
+                "  nt-db:",
+                f"    dir_path: {tmp_path / 'nt'}",
+                "    tasks:",
+                "      - url: https://example.com/nt.tar.gz",
+                "        file_name: nt.tar.gz",
+            ]
+        )
+    )
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "add",
+            "--cache-dir",
+            str(tmp_path),
+            "-i",
+            str(task_file),
+            "--group",
+            "nt-db",
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["would_add"] == 1
+    assert payload["count"] == 1
+    assert payload["records"][0]["url"] == "https://example.com/nt.tar.gz"
+    assert payload["records"][0]["file_name"] == "nt.tar.gz"
+    assert payload["records"][0]["dir_path"] == str(tmp_path / "nt")
+    assert "retry" not in payload["records"][0]
+    assert not queue_path(str(tmp_path)).exists()
+
+
+def test_cli_queue_add_schema_v2_rejects_unknown_group(tmp_path, capsys):
+    task_file = tmp_path / "tasks.yaml"
+    task_file.write_text("version: 2\ngroups:\n  nt-db:\n    tasks: []\n")
+
+    exit_code = cli.main(
+        [
+            "queue",
+            "add",
+            "--cache-dir",
+            str(tmp_path),
+            "-i",
+            str(task_file),
+            "--group",
+            "missing",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "group not found" in output
+    assert not queue_path(str(tmp_path)).exists()
+
+
 def test_cli_queue_list_status_and_attempt_filters(tmp_path, capsys):
     cli.main(["queue", "add", "--cache-dir", str(tmp_path), "https://example.com/a.bin"])
     cli.main(["queue", "add", "--cache-dir", str(tmp_path), "https://example.com/b.bin"])

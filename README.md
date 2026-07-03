@@ -436,6 +436,10 @@ v0.4.3 开始，可以把任务写入本地队列后再启动下载：
 pdman queue add "https://example.com/file.bin"
 pdman queue add --json "https://example.com/file.bin"
 pdman queue add -i tasks.yaml
+pdman queue add -i tasks.yaml --list-groups
+pdman queue add -i tasks.yaml --group nt-db --dry-run
+pdman queue add -i tasks.yaml --group nt-db --dry-run --json
+pdman queue add -i tasks.yaml --group nt-db
 pdman queue add -d /data/downloads --file-name file.bin "https://example.com/file.bin"
 pdman queue list
 pdman queue list --last 0
@@ -465,6 +469,8 @@ pdman queue clear --status completed --json
 pdman queue clear --all
 pdman queue clear --all --json
 ```
+
+v0.8.18 起，`queue add` 支持 YAML schema v2 的 group 入口：`--list-groups` 只列出 groups，不写 queue；`--dry-run` 只预览将要入队的 records，不写 queue；`--group NAME` 只解析指定 group。queue record schema 仍保持 v1，不保存 `TaskInput.options`，也不把 schema v2 的 `retry`、`headers` 等额外字段映射到 queue record。
 
 队列文件位于 `~/.cache/pdman/queue.jsonl`。`queue start` 会读取 `pending` 任务，使用真实 `Manager` 执行下载，并把队列状态更新为 `completed`、`skipped` 或 `failed`。
 

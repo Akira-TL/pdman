@@ -111,18 +111,48 @@ def _print_dry_run_tasks(tasks: list[TaskInput]) -> None:
             print(f"    options: {rendered_options}")
 
 
-def _handle_list_groups(input_files: list[str]) -> int:
+def _collect_task_groups(input_files: list[str]) -> list[str]:
     groups: list[str] = []
     for input_file in input_files:
         if os.path.exists(input_file):
             groups.extend(load_task_groups(input_file))
+    return list(dict.fromkeys(groups))
+
+
+def _print_task_groups(groups: list[str]) -> None:
     print("Groups:")
     if not groups:
         print("  none")
-        return 0
-    for group in dict.fromkeys(groups):
+        return
+    for group in groups:
         print(f"  {group}")
+
+
+def _handle_list_groups(input_files: list[str], *, json_output: bool = False) -> int:
+    groups = _collect_task_groups(input_files)
+    if json_output:
+        print_json({"groups": groups, "count": len(groups)})
+        return 0
+    _print_task_groups(groups)
     return 0
+
+
+def _queue_add_dry_run_payload(records) -> dict:
+    payload = queue_records_payload(records)
+    payload["dry_run"] = True
+    payload["would_add"] = payload["count"]
+    return payload
+
+
+def _print_queue_add_dry_run(records) -> None:
+    print("Queue add dry-run:")
+    if not records:
+        print("  none")
+        return
+    for record in records:
+        file_name = record.file_name or "-"
+        dir_path = record.dir_path or "-"
+        print(f"  {record.url} file_name={file_name} dir_path={dir_path}")
 
 
 def handle_history_command(argv=None) -> int:
@@ -367,13 +397,24 @@ def handle_queue_add_command(argv=None) -> int:
     parser.add_argument("-d", "--dir", dest="dir_path", default=None)
     parser.add_argument("--file-name", default=None)
     parser.add_argument("--md5", default=None)
+    parser.add_argument("--group", default=None)
+    parser.add_argument("--list-groups", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args(argv)
 
-    tasks = []
-    for input_file in args.input_file:
-        tasks.extend(load_task_input(input_file))
+    if args.list_groups:
+        return _handle_list_groups(args.input_file, json_output=args.json)
+
+    try:
+        tasks = []
+        for input_file in args.input_file:
+            tasks.extend(load_task_input(input_file, group=args.group))
+    except ValueError as exc:
+        print(f"Failed to resolve queue input tasks: {exc}")
+        return 1
+
     for index, url in enumerate(args.urls):
         file_name = args.file_name if len(args.urls) == 1 and index == 0 else None
         tasks.append(
@@ -389,6 +430,12 @@ def handle_queue_add_command(argv=None) -> int:
             if task.dir_path is None:
                 task.dir_path = args.dir_path
     records = create_queue_records(tasks)
+    if args.dry_run:
+        if args.json:
+            print_json(_queue_add_dry_run_payload(records))
+        else:
+            _print_queue_add_dry_run(records)
+        return 0
     append_queue(records, args.cache_dir)
     if args.json:
         print_json(queue_add_payload(records))
