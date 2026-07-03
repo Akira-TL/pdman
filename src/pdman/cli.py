@@ -66,7 +66,7 @@ from .resume_metadata_inspect import (
     resume_metadata_summary,
 )
 from .runtime import default_cache_root, default_system_tmp_root
-from .task_input import TaskInput, load_task_input
+from .task_input import TaskInput, load_task_groups, load_task_input
 
 
 def get_version() -> str:
@@ -74,6 +74,55 @@ def get_version() -> str:
         return package_version("pdman")
     except PackageNotFoundError:
         return "unknown"
+
+
+def _task_display_name(task: TaskInput) -> str:
+    target = task.file_name or "-"
+    directory = task.dir_path or "-"
+    group = task.group or "-"
+    return f"{task.url} file_name={target} dir_path={directory} group={group}"
+
+
+def _collect_dry_run_tasks(args) -> list[TaskInput]:
+    tasks: list[TaskInput] = []
+    for input_file in args.input_file or []:
+        tasks.extend(load_task_input(input_file, group=args.group))
+    if args.urls:
+        for index, url in enumerate(args.urls):
+            file_name = args.out if len(args.urls) == 1 and index == 0 else None
+            tasks.append(TaskInput(url=url, file_name=file_name, dir_path=args.dir))
+    for task in tasks:
+        if task.dir_path is None:
+            task.dir_path = args.dir
+    return tasks
+
+
+def _print_dry_run_tasks(tasks: list[TaskInput]) -> None:
+    print("Resolved tasks:")
+    if not tasks:
+        print("  none")
+        return
+    for task in tasks:
+        print(f"  {_task_display_name(task)}")
+        if task.options:
+            rendered_options = ", ".join(
+                f"{key}={value}" for key, value in sorted(task.options.items())
+            )
+            print(f"    options: {rendered_options}")
+
+
+def _handle_list_groups(input_files: list[str]) -> int:
+    groups: list[str] = []
+    for input_file in input_files:
+        if os.path.exists(input_file):
+            groups.extend(load_task_groups(input_file))
+    print("Groups:")
+    if not groups:
+        print("  none")
+        return 0
+    for group in dict.fromkeys(groups):
+        print(f"  {group}")
+    return 0
 
 
 def handle_history_command(argv=None) -> int:
@@ -817,6 +866,22 @@ def main(argv=None):
         help="Downloads URIs found in FILE(s). Supports JSON, YAML, or plain text.",
     )
     parser.add_argument(
+        "--group",
+        type=str,
+        default=None,
+        help="Load only one schema v2 input-file group.",
+    )
+    parser.add_argument(
+        "--list-groups",
+        action="store_true",
+        help="List schema v2 input-file groups and exit without downloading.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Resolve input tasks and print them without downloading.",
+    )
+    parser.add_argument(
         "-x",
         "--max-concurrent-downloads",
         type=int,
@@ -1042,6 +1107,15 @@ def main(argv=None):
     )
 
     args = parser.parse_args(argv)
+    if args.list_groups:
+        return _handle_list_groups(args.input_file)
+    if args.dry_run:
+        try:
+            _print_dry_run_tasks(_collect_dry_run_tasks(args))
+            return 0
+        except ValueError as exc:
+            print(f"Failed to resolve input tasks: {exc}")
+            return 1
     if args.log == "-":
         args.log = sys.stdout
     if args.force_sequential and args.out is not None:
@@ -1105,7 +1179,7 @@ def main(argv=None):
     if args.input_file:
         for file in args.input_file:
             if os.path.exists(file):
-                pdman.load_input_file(file)
+                pdman.load_input_file(file, group=args.group)
     try:
         asyncio.run(pdman.download())
         return pdman.exit_code

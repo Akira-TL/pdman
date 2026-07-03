@@ -117,12 +117,35 @@ https://example.com/a.iso:
   log_path: /data/logs/a.log
 ```
 
+v0.8.17 起，YAML 任务文件也支持 schema v2，用于批量数据集任务的 defaults 和 groups：
+
+```yaml
+version: 2
+
+defaults:
+  dir_path: /data/downloads
+  retry: 5
+
+groups:
+  nt-db:
+    dir_path: /data/blast/nt
+    tasks:
+      - url: https://example.com/nt.171.tar.gz
+        file_name: nt.171.tar.gz
+        md5: https://example.com/nt.171.tar.gz.md5
+```
+
 执行：
 
 ```bash
 pdman -i tasks.json
 pdman -i tasks.yaml
+pdman -i tasks.yaml --list-groups
+pdman -i tasks.yaml --group nt-db --dry-run
+pdman -i tasks.yaml --group nt-db
 ```
+
+schema v2 的 `file_name`、`dir_path`、`md5`、`log_path` 会进入实际 task；其他字段会先保存在解析后的 `options` 中，当前版本不把它们映射成 per-task 下载行为。
 
 ---
 

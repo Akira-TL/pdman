@@ -505,7 +505,7 @@ class Manager:
             for url in url_list:
                 self.append(url, dir_path=self.out_dir if self.out_dir else os.getcwd())
 
-    def load_input_file(self, input_file: str) -> None:
+    def load_input_file(self, input_file: str, *, group: str | None = None) -> None:
         """
         加载输入文件并将其中的 URL 添加到下载队列。
 
@@ -515,7 +515,7 @@ class Manager:
             None
         """
         try:
-            for task in load_task_input(input_file):
+            for task in load_task_input(input_file, group=group):
                 self.append(
                     task.url,
                     md5=task.md5,

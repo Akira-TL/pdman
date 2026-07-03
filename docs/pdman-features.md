@@ -119,6 +119,8 @@ https://example.com/b.zip
 
 ### 3.3 YAML
 
+Legacy YAML 任务文件保持兼容：
+
 ```yaml
 https://example.com/a.iso:
   file_name: linux.iso
@@ -126,6 +128,36 @@ https://example.com/a.iso:
   md5: 0123456789abcdef0123456789abcdef
   log_path: /data/logs/a.log
 ```
+
+v0.8.17 起，YAML schema v2 支持 defaults 和 groups：
+
+```yaml
+version: 2
+
+defaults:
+  dir_path: /data/downloads
+  retry: 5
+  headers:
+    User-Agent: PDMAN
+
+groups:
+  nt-db:
+    dir_path: /data/blast/nt
+    tasks:
+      - url: https://example.com/nt.171.tar.gz
+        file_name: nt.171.tar.gz
+        md5: https://example.com/nt.171.tar.gz.md5
+      - url: https://example.com/nt.172.tar.gz
+        file_name: nt.172.tar.gz
+```
+
+```bash
+pdman -i tasks.yaml --list-groups
+pdman -i tasks.yaml --group nt-db --dry-run
+pdman -i tasks.yaml --group nt-db
+```
+
+解析优先级固定为 task > group > defaults。当前版本只把 `file_name`、`dir_path`、`md5`、`log_path` 映射到实际下载 task；其他 schema v2 字段保存在 `TaskInput.options`，用于 dry-run 和后续 contract 扩展，不会立即改变下载行为。
 
 任务字段说明：
 
