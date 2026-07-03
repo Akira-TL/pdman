@@ -355,6 +355,8 @@ pdman records schema
 pdman records schema --surface show --json
 ```
 
+当前 `records doctor` contract 总览：它是只读健康检查，不修复 history，不迁移 schema，不读取完整 metadata，不触发 debug 或 queue。`--json` 输出完整 report，包含 summary、`issue_groups` 和逐条 `issues`；`--jsonl` 只输出逐 issue stream；readable 输出固定为 summary、status counts、metadata counts、issue groups、issues。`records schema --surface doctor --json` 可在不运行 doctor 的情况下读取这些输出边界。
+
 `records list --json` 输出 `{records, count}`；每个 record 包含 `run_id`、`task_id`、`url`、`filename`、`target_path`、`status`、`file_size`、`created_at`、`completed_at`、`resume_rejection`、`header_probe` 和 `network_error`。`--jsonl` 每行输出一个 record，方便 agent 或管道逐条处理。
 
 v0.8.1 起，`records list` 支持基础 exact-match filters：`--status completed|skipped|failed`、`--url URL`、`--target PATH`、`--run-id RUN_ID` 和 `--limit N`。这些过滤不做 fuzzy search、regex、contains 或 URL/path normalization；`--target` 按记录中的目标路径字符串精确匹配。`--limit 0` 表示不过滤数量；保留 `--last` 兼容 v0.8.0，若同时传入 `--limit`，以 `--limit` 为准。
@@ -396,6 +398,8 @@ v0.8.12 起，doctor contract 提供稳定示例 payload：`ok`、`warning_group
 v0.8.13 起，doctor 输出模式边界固定：`--json` 输出完整 doctor report；`--jsonl` 只输出逐 issue stream，不包含 `issue_groups`、`status_counts`、`metadata_state_counts` 等 summary 字段；readable 输出顺序固定为 summary、status counts、metadata counts、issue groups、issues。
 
 v0.8.14 起，`pdman records schema --surface doctor` 会自描述 doctor 三种输出模式：readable 是人类摘要，`--json` 是完整 report，`--jsonl` 是逐 issue stream。agent 可先读取 schema 判断消费哪种输出，而不需要实际运行 doctor。
+
+v0.8.15 起，records doctor 子阶段收口：README 增加当前 contract 总览，测试覆盖 doctor JSON、JSONL 和 schema contract 的一致性，后续不建议继续向 doctor 增加新功能，除非进入新的主题版本。
 
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 

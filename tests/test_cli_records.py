@@ -448,6 +448,39 @@ def test_cli_records_doctor_readable_outputs_summary(tmp_path, capsys):
     assert "issues: none" in output
 
 
+def test_cli_records_doctor_and_schema_contract_smoke(tmp_path, capsys):
+    write_history(
+        tmp_path,
+        [
+            {
+                "run_id": "run-1",
+                "task_id": "task-1",
+                "status": "unknown",
+            }
+        ],
+    )
+
+    json_exit = cli.main(["records", "doctor", "--json", "--cache-dir", str(tmp_path)])
+    doctor_payload = json.loads(capsys.readouterr().out)
+    jsonl_exit = cli.main(["records", "doctor", "--jsonl", "--cache-dir", str(tmp_path)])
+    doctor_issues = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    schema_exit = cli.main(["records", "schema", "--surface", "doctor", "--json"])
+    schema_payload = json.loads(capsys.readouterr().out)
+
+    assert json_exit == 0
+    assert jsonl_exit == 0
+    assert schema_exit == 0
+    assert "issue_groups" in doctor_payload
+    assert [issue["code"] for issue in doctor_issues] == [
+        "invalid_status",
+        "url_missing",
+    ]
+    assert all("issue_groups" not in issue for issue in doctor_issues)
+    output_contract = schema_payload["commands"]["doctor"]["output_contract"]
+    assert output_contract["json"] == "full doctor report with summary fields, issue_groups, and issues"
+    assert output_contract["jsonl"] == "issue stream only; one doctor_issue per line; no summary or issue_groups fields"
+
+
 def test_cli_records_schema_json_outputs_contract(capsys):
     exit_code = cli.main(["records", "schema", "--surface", "show", "--json"])
 
