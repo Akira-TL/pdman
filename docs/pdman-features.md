@@ -992,6 +992,8 @@ v0.8.20 起，YAML schema v2 解析错误会带稳定 reason code，例如 `sche
 
 v0.8.21 起，主下载入口也支持 JSON dry-run：`pdman -i tasks.yaml --group NAME --dry-run --json` 会输出 `{ "dry_run": true, "count", "group", "tasks" }`；每个 task 包含 `url`、`file_name`、`dir_path`、`md5`、`log_path`，schema v2 group task 还会包含 `group` 和 `options`。解析失败时复用 `{ "error": { "code", "message", "field" } }`。
 
+v0.8.22 起，`pdman input examples` 和 `pdman input examples --json` 提供稳定 in-memory examples：`minimal`、`grouped`、`group_selected`、`with_options`、`invalid_defaults`、`invalid_missing_url`。这些 examples 用于测试、人类文档和 agent contract 读取，不读取文件、不启动下载、不写 queue。v0.8 YAML schema v2 线到此收口；后续不继续扩展下载行为，per-task retry/header 映射和 queue schema 扩展进入后续主题版本。
+
 queue record schema：
 
 ```json

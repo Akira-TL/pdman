@@ -57,12 +57,49 @@ def test_cli_input_schema_readable(capsys):
     assert "does not write TaskInput.options to queue records" in output
 
 
-def test_cli_input_requires_schema(capsys):
+def test_cli_input_examples_json(capsys):
+    exit_code = cli.main(["input", "examples", "minimal", "invalid_defaults", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["count"] == 2
+    assert payload["examples"][0]["kind"] == "minimal"
+    assert payload["examples"][0]["valid"] is True
+    assert payload["examples"][1]["kind"] == "invalid_defaults"
+    assert payload["examples"][1]["valid"] is False
+    assert payload["examples"][1]["error"]["code"] == "schema_v2_defaults_not_mapping"
+
+
+def test_cli_input_examples_readable(capsys):
+    exit_code = cli.main(["input", "examples", "minimal", "invalid_defaults"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Task input examples:" in output
+    assert "minimal: valid count=1 group=-" in output
+    assert "invalid_defaults: invalid:schema_v2_defaults_not_mapping" in output
+
+
+def test_cli_input_examples_unknown_kind_json(capsys):
+    exit_code = cli.main(["input", "examples", "missing", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload == {
+        "error": {
+            "code": "task_input_example_not_found",
+            "message": "task input example not found: missing",
+            "field": "kind",
+        }
+    }
+
+
+def test_cli_input_requires_schema_or_examples(capsys):
     exit_code = cli.main(["input"])
 
     output = capsys.readouterr().out
     assert exit_code == 1
-    assert "Input command required: schema" in output
+    assert "Input command required: schema or examples" in output
 
 
 def test_cli_list_groups_for_schema_v2_input(tmp_path, capsys):

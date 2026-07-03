@@ -478,6 +478,8 @@ v0.8.20 起，YAML schema v2 解析错误会带稳定 reason code，例如 `sche
 
 v0.8.21 起，主下载入口也支持 JSON dry-run：`pdman -i tasks.yaml --group NAME --dry-run --json` 会输出 `{ "dry_run": true, "count", "group", "tasks" }`；每个 task 包含 `url`、`file_name`、`dir_path`、`md5`、`log_path`，schema v2 group task 还会包含 `group` 和 `options`。解析失败时复用 `{ "error": { "code", "message", "field" } }`。
 
+v0.8.22 起，`pdman input examples` 和 `pdman input examples --json` 提供稳定 in-memory examples：`minimal`、`grouped`、`group_selected`、`with_options`、`invalid_defaults`、`invalid_missing_url`。这些 examples 用于测试、人类文档和 agent contract 读取，不读取文件、不启动下载、不写 queue。v0.8 YAML schema v2 线到此收口；后续不继续扩展下载行为，per-task retry/header 映射和 queue schema 扩展进入后续主题版本。
+
 队列文件位于 `~/.cache/pdman/queue.jsonl`。`queue start` 会读取 `pending` 任务，使用真实 `Manager` 执行下载，并把队列状态更新为 `completed`、`skipped` 或 `failed`。
 
 v0.4.5 开始，queue record 会记录 `attempts`。每次 `queue start` 或 `queue retry-failed` 真正取出任务执行时，`attempts` 会递增。`queue retry-failed` 会读取 failed 任务重新执行；成功后状态变成 `completed` 且 `last_error=None`，再次失败则保持 `failed` 并更新 `last_error`。

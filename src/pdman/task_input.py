@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 from dataclasses import dataclass, field
@@ -301,6 +302,194 @@ def load_task_groups(input_file: str) -> list[str]:
     return list_task_groups_from_data(_load_structured_file(input_file))
 
 
+_TASK_INPUT_EXAMPLES: dict[str, dict[str, Any]] = {
+    "minimal": {
+        "description": "Smallest YAML schema v2 input with a top-level task.",
+        "group": None,
+        "input": {
+            "version": 2,
+            "tasks": [
+                {
+                    "url": "https://example.com/file.bin",
+                    "file_name": "file.bin",
+                }
+            ],
+        },
+    },
+    "grouped": {
+        "description": "Grouped dataset input with defaults and two groups; resolves all groups by default.",
+        "group": None,
+        "input": {
+            "version": 2,
+            "defaults": {"dir_path": "/data/downloads"},
+            "groups": {
+                "nt-db": {
+                    "dir_path": "/data/blast/nt",
+                    "tasks": [
+                        {
+                            "url": "https://example.com/nt.171.tar.gz",
+                            "file_name": "nt.171.tar.gz",
+                            "md5": "https://example.com/nt.171.tar.gz.md5",
+                        }
+                    ],
+                },
+                "refseq": {
+                    "tasks": [
+                        {
+                            "url": "https://example.com/refseq.tar.gz",
+                            "file_name": "refseq.tar.gz",
+                        }
+                    ],
+                },
+            },
+        },
+    },
+    "group_selected": {
+        "description": "Grouped dataset input resolved with --group nt-db.",
+        "group": "nt-db",
+        "input": {
+            "version": 2,
+            "defaults": {"dir_path": "/data/downloads", "retry": 5},
+            "groups": {
+                "nt-db": {
+                    "dir_path": "/data/blast/nt",
+                    "tasks": [
+                        {
+                            "url": "https://example.com/nt.171.tar.gz",
+                            "file_name": "nt.171.tar.gz",
+                        }
+                    ],
+                },
+                "refseq": {
+                    "tasks": [
+                        {
+                            "url": "https://example.com/refseq.tar.gz",
+                            "file_name": "refseq.tar.gz",
+                        }
+                    ],
+                },
+            },
+        },
+    },
+    "with_options": {
+        "description": "Schema v2 input with future option fields preserved under TaskInput.options.",
+        "group": "dataset",
+        "input": {
+            "version": 2,
+            "defaults": {
+                "dir_path": "/data/downloads",
+                "retry": 5,
+                "headers": {"User-Agent": "PDMAN"},
+            },
+            "groups": {
+                "dataset": {
+                    "max_connections": 8,
+                    "tasks": [
+                        {
+                            "url": "https://example.com/data.tar.gz",
+                            "file_name": "data.tar.gz",
+                            "connect_timeout": 30,
+                        }
+                    ],
+                }
+            },
+        },
+    },
+    "invalid_defaults": {
+        "description": "Invalid schema v2 input where defaults is not a mapping.",
+        "group": None,
+        "input": {"version": 2, "defaults": []},
+    },
+    "invalid_missing_url": {
+        "description": "Invalid schema v2 input where a task mapping has no url.",
+        "group": None,
+        "input": {"version": 2, "tasks": [{"file_name": "missing-url.bin"}]},
+    },
+}
+
+
+def task_input_example_names() -> list[str]:
+    return list(_TASK_INPUT_EXAMPLES)
+
+
+def task_input_example_input(kind: str) -> dict[str, Any]:
+    try:
+        return copy.deepcopy(_TASK_INPUT_EXAMPLES[kind]["input"])
+    except KeyError:
+        raise _task_input_error(
+            "task_input_example_not_found",
+            f"task input example not found: {kind}",
+            field="kind",
+        )
+
+
+def task_input_example_payload(kind: str) -> dict[str, Any]:
+    try:
+        example = _TASK_INPUT_EXAMPLES[kind]
+    except KeyError:
+        raise _task_input_error(
+            "task_input_example_not_found",
+            f"task input example not found: {kind}",
+            field="kind",
+        )
+    input_data = copy.deepcopy(example["input"])
+    group = example.get("group")
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": kind,
+        "description": example["description"],
+        "group": group,
+        "input": input_data,
+    }
+    try:
+        tasks = parse_task_data(input_data, group=group)
+    except ValueError as exc:
+        payload.update(
+            {
+                "valid": False,
+                "count": 0,
+                "tasks": [],
+                "error": task_input_error_payload(exc),
+            }
+        )
+    else:
+        payload.update(
+            {
+                "valid": True,
+                "count": len(tasks),
+                "tasks": [task.to_dict() for task in tasks],
+                "error": None,
+            }
+        )
+    return payload
+
+
+def task_input_examples_payload(kinds: list[str] | None = None) -> dict[str, Any]:
+    selected = task_input_example_names() if not kinds else kinds
+    examples = [task_input_example_payload(kind) for kind in selected]
+    return {
+        "schema_version": 1,
+        "examples": examples,
+        "count": len(examples),
+        "available_examples": task_input_example_names(),
+    }
+
+
+def format_task_input_examples(payload: dict[str, Any]) -> str:
+    lines = ["Task input examples:"]
+    if not payload["examples"]:
+        lines.append("  none")
+        return "\n".join(lines)
+    for example in payload["examples"]:
+        status = "valid" if example["valid"] else f"invalid:{example['error']['code']}"
+        group = example["group"] if example["group"] is not None else "-"
+        lines.append(
+            f"  {example['kind']}: {status} count={example['count']} group={group}"
+        )
+        lines.append(f"    {example['description']}")
+    return "\n".join(lines)
+
+
 def task_input_schema_payload() -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -311,7 +500,12 @@ def task_input_schema_payload() -> dict[str, Any]:
                 "introduced_in": "0.8.19",
                 "outputs": ["readable", "json"],
                 "purpose": "Describe task input formats and YAML schema v2 boundaries without reading task files or downloading.",
-            }
+            },
+            "input examples": {
+                "introduced_in": "0.8.22",
+                "outputs": ["readable", "json"],
+                "purpose": "Show stable in-memory YAML schema v2 examples and their parse results without reading task files or downloading.",
+            },
         },
         "legacy_formats": {
             "plain_text": "one URL per non-empty line",
@@ -352,6 +546,7 @@ def task_input_schema_payload() -> dict[str, Any]:
                 "schema_v2_group_not_found": "requested group does not exist",
                 "group_requires_schema_v2": "--group requires schema v2 input",
             },
+            "examples": task_input_example_names(),
             "selection": {
                 "main_cli": "pdman -i tasks.yaml --group NAME",
                 "queue_add": "pdman queue add -i tasks.yaml --group NAME",
@@ -362,6 +557,11 @@ def task_input_schema_payload() -> dict[str, Any]:
                 "dry_run": [
                     "pdman -i tasks.yaml --group NAME --dry-run",
                     "pdman queue add -i tasks.yaml --group NAME --dry-run",
+                ],
+                "examples": [
+                    "pdman input examples",
+                    "pdman input examples --json",
+                    "pdman input examples KIND --json",
                 ],
             },
         },
@@ -406,6 +606,7 @@ def format_task_input_schema(payload: dict[str, Any]) -> str:
     lines.append("    validation_errors:")
     for code, description in schema_v2["validation_errors"].items():
         lines.append(f"      {code}: {description}")
+    lines.append("    examples: " + ", ".join(schema_v2["examples"]))
     lines.append("    precedence: " + " > ".join(schema_v2["precedence"]))
     lines.append("  mapped_fields: " + ", ".join(payload["mapped_fields"]))
     lines.append(f"  preserved_option_fields: {payload['preserved_option_fields']}")

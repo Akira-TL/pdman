@@ -4,11 +4,15 @@ from pdman.task_input import (
     TaskInput,
     TaskInputError,
     format_task_input_error,
+    format_task_input_examples,
     format_task_input_schema,
     load_task_groups,
     load_task_input,
     parse_task_data,
     task_input_error_payload,
+    task_input_example_names,
+    task_input_example_payload,
+    task_input_examples_payload,
     task_input_schema_payload,
 )
 
@@ -201,6 +205,55 @@ def test_schema_v2_validation_error_codes():
             raise AssertionError(f"expected {expected_code}")
 
 
+def test_task_input_examples_payload_contains_valid_and_invalid_examples():
+    names = task_input_example_names()
+    payload = task_input_examples_payload()
+
+    assert names == [
+        "minimal",
+        "grouped",
+        "group_selected",
+        "with_options",
+        "invalid_defaults",
+        "invalid_missing_url",
+    ]
+    assert payload["count"] == len(names)
+    examples = {example["kind"]: example for example in payload["examples"]}
+    assert examples["minimal"]["valid"] is True
+    assert examples["minimal"]["tasks"][0]["url"] == "https://example.com/file.bin"
+    assert examples["group_selected"]["valid"] is True
+    assert examples["group_selected"]["group"] == "nt-db"
+    assert examples["group_selected"]["tasks"][0]["group"] == "nt-db"
+    assert examples["with_options"]["valid"] is True
+    assert examples["with_options"]["tasks"][0]["options"] == {
+        "retry": 5,
+        "headers": {"User-Agent": "PDMAN"},
+        "max_connections": 8,
+        "connect_timeout": 30,
+    }
+    assert examples["invalid_defaults"]["valid"] is False
+    assert examples["invalid_defaults"]["error"]["code"] == "schema_v2_defaults_not_mapping"
+    assert examples["invalid_missing_url"]["valid"] is False
+    assert examples["invalid_missing_url"]["error"]["code"] == "task_mapping_url_missing"
+
+
+def test_task_input_example_payload_rejects_unknown_kind():
+    try:
+        task_input_example_payload("missing")
+    except TaskInputError as exc:
+        assert exc.code == "task_input_example_not_found"
+    else:
+        raise AssertionError("expected missing task input example to be rejected")
+
+
+def test_format_task_input_examples_readable():
+    output = format_task_input_examples(task_input_examples_payload(["minimal", "invalid_defaults"]))
+
+    assert "Task input examples:" in output
+    assert "minimal: valid count=1 group=-" in output
+    assert "invalid_defaults: invalid:schema_v2_defaults_not_mapping" in output
+
+
 def test_task_input_schema_payload_contract():
     payload = task_input_schema_payload()
 
@@ -211,6 +264,8 @@ def test_task_input_schema_payload_contract():
     assert payload["schema_v2"]["precedence"] == ["task", "group", "defaults"]
     assert payload["schema_v2"]["validation_errors"]["schema_v2_defaults_not_mapping"] == "defaults must be a mapping"
     assert payload["schema_v2"]["validation_errors"]["task_mapping_url_missing"] == "task mapping must include url"
+    assert payload["schema_v2"]["examples"] == task_input_example_names()
+    assert payload["commands"]["input examples"]["introduced_in"] == "0.8.22"
     assert payload["mapped_fields"] == ["url", "file_name", "dir_path", "md5", "log_path"]
     assert "does not change queue record schema v1" in payload["non_goals"]
     assert "does not write TaskInput.options to queue records" in payload["non_goals"]
@@ -223,6 +278,7 @@ def test_format_task_input_schema_readable_contract():
     assert "schema_v2:" in output
     assert "precedence: task > group > defaults" in output
     assert "schema_v2_defaults_not_mapping: defaults must be a mapping" in output
+    assert "examples: minimal, grouped, group_selected, with_options, invalid_defaults, invalid_missing_url" in output
     assert "mapped_fields: url, file_name, dir_path, md5, log_path" in output
     assert "does not change queue record schema v1" in output
 

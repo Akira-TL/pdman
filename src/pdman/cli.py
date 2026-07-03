@@ -69,10 +69,12 @@ from .runtime import default_cache_root, default_system_tmp_root
 from .task_input import (
     TaskInput,
     format_task_input_error,
+    format_task_input_examples,
     format_task_input_schema,
     load_task_groups,
     load_task_input,
     task_input_error_payload,
+    task_input_examples_payload,
     task_input_schema_payload,
 )
 
@@ -184,14 +186,36 @@ def handle_input_schema_command(argv=None) -> int:
     return 0
 
 
+def handle_input_examples_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman input examples")
+    parser.add_argument("kinds", nargs="*")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        payload = task_input_examples_payload(args.kinds)
+    except ValueError as exc:
+        if args.json:
+            print_json({"error": task_input_error_payload(exc)})
+        else:
+            print(f"Failed to load input examples: {format_task_input_error(exc)}")
+        return 1
+    if args.json:
+        print_json(payload)
+        return 0
+    print(format_task_input_examples(payload))
+    return 0
+
+
 def handle_input_command(argv=None) -> int:
     argv = list(argv or [])
     if not argv:
-        print("Input command required: schema")
+        print("Input command required: schema or examples")
         return 1
     command, rest = argv[0], argv[1:]
     if command == "schema":
         return handle_input_schema_command(rest)
+    if command == "examples":
+        return handle_input_examples_command(rest)
     print(f"Unknown input command: {command}")
     return 1
 
