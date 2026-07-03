@@ -280,10 +280,36 @@ def test_cli_records_doctor_jsonl_outputs_issues(tmp_path, capsys):
 
     lines = capsys.readouterr().out.splitlines()
     assert exit_code == 0
-    assert [json.loads(line)["code"] for line in lines] == [
+    issues = [json.loads(line) for line in lines]
+    assert [issue["code"] for issue in issues] == [
         "invalid_status",
         "url_missing",
     ]
+    forbidden_summary_keys = {
+        "schema_version",
+        "status",
+        "records_checked",
+        "issue_count",
+        "total_issue_count",
+        "filters",
+        "status_counts",
+        "metadata_state_counts",
+        "issue_groups",
+        "issues",
+    }
+    for issue in issues:
+        assert forbidden_summary_keys.isdisjoint(issue)
+        assert {
+            "code",
+            "severity",
+            "message",
+            "impact",
+            "suggested_action",
+            "run_id",
+            "task_id",
+            "url",
+            "target_path",
+        } <= set(issue)
 
 
 def test_cli_records_doctor_jsonl_filters_issues(tmp_path, capsys):
@@ -320,6 +346,9 @@ def test_cli_records_doctor_jsonl_filters_issues(tmp_path, capsys):
     assert issues[0]["suggested_action"] == (
         "Inspect the source history record and confirm whether the status should be completed, skipped, or failed."
     )
+    assert "issue_groups" not in issues[0]
+    assert "status_counts" not in issues[0]
+    assert "metadata_state_counts" not in issues[0]
 
 
 def test_cli_records_doctor_filtered_status_controls_fail_on(tmp_path, capsys):

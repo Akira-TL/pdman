@@ -602,6 +602,31 @@ def test_format_records_doctor_readable_summary_includes_issue_groups(tmp_path):
     assert "info url_missing count=1" in output
 
 
+def test_format_records_doctor_readable_output_order_is_stable(tmp_path):
+    write_history(
+        tmp_path,
+        [
+            {
+                "status": "unknown",
+            }
+        ],
+    )
+
+    output = format_records_doctor(records_doctor_payload(str(tmp_path)))
+    ordered_markers = [
+        "  status:",
+        "  records_checked:",
+        "  issue_count:",
+        "  status_counts:",
+        "  metadata_state_counts:",
+        "  issue_groups:",
+        "  issues:",
+    ]
+    positions = [output.index(marker) for marker in ordered_markers]
+
+    assert positions == sorted(positions)
+
+
 def test_records_schema_payload_describes_all_records_surfaces():
     payload = records_schema_payload()
 
