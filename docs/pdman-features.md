@@ -892,6 +892,8 @@ v0.8.14 起，`pdman records schema --surface doctor` 会自描述 doctor 三种
 
 v0.8.15 起，records doctor 子阶段收口：文档增加当前 contract 总览，测试覆盖 doctor JSON、JSONL 和 schema contract 的一致性，后续不建议继续向 doctor 增加新功能，除非进入新的主题版本。
 
+v0.8.16 起，`docs/releases/v0.8.md` 汇总 v0.8 records query、metadata locator、single-record inspection、schema、doctor contract、stable surfaces、non-goals 和 release-readiness 检查。该版本只做发布收束和边界文档，不改变运行行为。
+
 Records 与 history/run 的边界：
 
 | Surface | 定位 |
@@ -900,7 +902,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.15 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.16 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 

@@ -401,6 +401,8 @@ v0.8.14 起，`pdman records schema --surface doctor` 会自描述 doctor 三种
 
 v0.8.15 起，records doctor 子阶段收口：README 增加当前 contract 总览，测试覆盖 doctor JSON、JSONL 和 schema contract 的一致性，后续不建议继续向 doctor 增加新功能，除非进入新的主题版本。
 
+v0.8.16 起，`docs/releases/v0.8.md` 汇总 v0.8 records query、metadata locator、single-record inspection、schema、doctor contract、stable surfaces、non-goals 和 release-readiness 检查。该版本只做发布收束和边界文档，不改变运行行为。
+
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 
 ### 本地队列命令
