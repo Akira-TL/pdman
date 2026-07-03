@@ -105,6 +105,15 @@ def _collect_dry_run_tasks(args) -> list[TaskInput]:
     return tasks
 
 
+def _dry_run_tasks_payload(tasks: list[TaskInput], *, group: str | None = None) -> dict:
+    return {
+        "dry_run": True,
+        "count": len(tasks),
+        "group": group,
+        "tasks": [task.to_dict() for task in tasks],
+    }
+
+
 def _print_dry_run_tasks(tasks: list[TaskInput]) -> None:
     print("Resolved tasks:")
     if not tasks:
@@ -967,6 +976,11 @@ def main(argv=None):
         help="Resolve input tasks and print them without downloading.",
     )
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print JSON output for --dry-run or --list-groups.",
+    )
+    parser.add_argument(
         "-x",
         "--max-concurrent-downloads",
         type=int,
@@ -1193,13 +1207,20 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     if args.list_groups:
-        return _handle_list_groups(args.input_file)
+        return _handle_list_groups(args.input_file, json_output=args.json)
     if args.dry_run:
         try:
-            _print_dry_run_tasks(_collect_dry_run_tasks(args))
+            tasks = _collect_dry_run_tasks(args)
+            if args.json:
+                print_json(_dry_run_tasks_payload(tasks, group=args.group))
+            else:
+                _print_dry_run_tasks(tasks)
             return 0
         except ValueError as exc:
-            print(f"Failed to resolve input tasks: {format_task_input_error(exc)}")
+            if args.json:
+                print_json({"error": task_input_error_payload(exc)})
+            else:
+                print(f"Failed to resolve input tasks: {format_task_input_error(exc)}")
             return 1
     if args.log == "-":
         args.log = sys.stdout

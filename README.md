@@ -476,6 +476,8 @@ v0.8.19 起，`pdman input schema` 提供输入格式 contract inspection；`--j
 
 v0.8.20 起，YAML schema v2 解析错误会带稳定 reason code，例如 `schema_v2_missing_version`、`schema_v2_defaults_not_mapping`、`schema_v2_group_not_found` 和 `task_mapping_url_missing`。main CLI `--dry-run` 的错误会显示 `[code] message`；`queue add --json` 解析失败时会输出 `{ "error": { "code", "message", "field" } }`，且不会写 queue。
 
+v0.8.21 起，主下载入口也支持 JSON dry-run：`pdman -i tasks.yaml --group NAME --dry-run --json` 会输出 `{ "dry_run": true, "count", "group", "tasks" }`；每个 task 包含 `url`、`file_name`、`dir_path`、`md5`、`log_path`，schema v2 group task 还会包含 `group` 和 `options`。解析失败时复用 `{ "error": { "code", "message", "field" } }`。
+
 队列文件位于 `~/.cache/pdman/queue.jsonl`。`queue start` 会读取 `pending` 任务，使用真实 `Manager` 执行下载，并把队列状态更新为 `completed`、`skipped` 或 `failed`。
 
 v0.4.5 开始，queue record 会记录 `attempts`。每次 `queue start` 或 `queue retry-failed` 真正取出任务执行时，`attempts` 会递增。`queue retry-failed` 会读取 failed 任务重新执行；成功后状态变成 `completed` 且 `last_error=None`，再次失败则保持 `failed` 并更新 `last_error`。

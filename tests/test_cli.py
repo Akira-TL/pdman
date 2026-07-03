@@ -124,6 +124,116 @@ def test_cli_dry_run_resolves_schema_v2_group_without_downloading(tmp_path, caps
     assert "refseq" not in output
 
 
+def test_cli_list_groups_json_for_schema_v2_input(tmp_path, capsys):
+    path = tmp_path / "tasks.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "groups:",
+                "  nt-db:",
+                "    tasks: []",
+                "  refseq:",
+                "    tasks: []",
+            ]
+        )
+    )
+
+    exit_code = cli.main(["-i", str(path), "--list-groups", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {"groups": ["nt-db", "refseq"], "count": 2}
+
+
+def test_cli_dry_run_json_resolves_schema_v2_group_without_downloading(tmp_path, capsys):
+    path = tmp_path / "tasks.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "defaults:",
+                "  dir_path: /data/default",
+                "  retry: 5",
+                "groups:",
+                "  nt-db:",
+                "    dir_path: /data/nt",
+                "    tasks:",
+                "      - url: https://example.com/nt.tar.gz",
+                "        file_name: nt.tar.gz",
+                "  refseq:",
+                "    tasks:",
+                "      - url: https://example.com/refseq.tar.gz",
+            ]
+        )
+    )
+
+    exit_code = cli.main(["-i", str(path), "--group", "nt-db", "--dry-run", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["count"] == 1
+    assert payload["group"] == "nt-db"
+    assert payload["tasks"] == [
+        {
+            "url": "https://example.com/nt.tar.gz",
+            "file_name": "nt.tar.gz",
+            "dir_path": "/data/nt",
+            "md5": None,
+            "log_path": None,
+            "group": "nt-db",
+            "options": {"retry": 5},
+        }
+    ]
+
+
+def test_cli_dry_run_json_resolves_direct_urls(tmp_path, capsys):
+    exit_code = cli.main(
+        [
+            "--dry-run",
+            "--json",
+            "-d",
+            str(tmp_path / "downloads"),
+            "-o",
+            "file.bin",
+            "https://example.com/file.bin",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["count"] == 1
+    assert payload["group"] is None
+    assert payload["tasks"] == [
+        {
+            "url": "https://example.com/file.bin",
+            "file_name": "file.bin",
+            "dir_path": str(tmp_path / "downloads"),
+            "md5": None,
+            "log_path": None,
+        }
+    ]
+
+
+def test_cli_dry_run_json_reports_schema_v2_error_code(tmp_path, capsys):
+    path = tmp_path / "tasks.yaml"
+    path.write_text("version: 2\ndefaults: []\n")
+
+    exit_code = cli.main(["-i", str(path), "--dry-run", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload == {
+        "error": {
+            "code": "schema_v2_defaults_not_mapping",
+            "message": "schema v2 defaults must be a mapping",
+            "field": "defaults",
+        }
+    }
+
+
 def test_cli_dry_run_reports_schema_v2_error_code(tmp_path, capsys):
     path = tmp_path / "tasks.yaml"
     path.write_text("version: 2\ndefaults: []\n")
