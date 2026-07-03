@@ -645,6 +645,11 @@ def test_records_schema_payload_describes_all_records_surfaces():
     ]
     assert payload["commands"]["doctor"]["json_shape"]["issue_groups"] == "list[doctor_issue_group]"
     assert payload["commands"]["doctor"]["json_shape"]["issues"] == "list[doctor_issue]"
+    assert payload["commands"]["doctor"]["output_contract"] == {
+        "readable": "human summary with stable order: summary, status_counts, metadata_state_counts, issue_groups, issues",
+        "json": "full doctor report with summary fields, issue_groups, and issues",
+        "jsonl": "issue stream only; one doctor_issue per line; no summary or issue_groups fields",
+    }
     assert payload["shared_payloads"]["doctor_issue"] == [
         "code",
         "severity",
@@ -686,7 +691,17 @@ def test_format_records_schema_readable_summary():
     assert "Records schema:" in output
     assert "surface: metadata" in output
     assert "metadata: introduced=0.8.2" in output
-    assert "shared_payloads: metadata_locator, debug_action, doctor_issue" in output
+    assert "shared_payloads: metadata_locator, debug_action, doctor_issue, doctor_issue_group" in output
+
+
+def test_format_records_schema_readable_doctor_output_contract():
+    output = format_records_schema(records_schema_payload(surface="doctor"))
+
+    assert "doctor: introduced=0.8.7 outputs=readable, json, jsonl" in output
+    assert "output_contract:" in output
+    assert "readable: human summary with stable order" in output
+    assert "json: full doctor report" in output
+    assert "jsonl: issue stream only" in output
 
 
 def test_suggested_debug_actions_include_argv_and_shell_command(tmp_path):

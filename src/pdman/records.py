@@ -527,6 +527,11 @@ def records_schema_payload(surface: str = "all") -> dict[str, Any]:
                 "issue_groups": "list[doctor_issue_group]",
                 "issues": "list[doctor_issue]",
             },
+            "output_contract": {
+                "readable": "human summary with stable order: summary, status_counts, metadata_state_counts, issue_groups, issues",
+                "json": "full doctor report with summary fields, issue_groups, and issues",
+                "jsonl": "issue stream only; one doctor_issue per line; no summary or issue_groups fields",
+            },
             "examples": ["ok", "warning_grouped", "filtered_warning"],
         },
         "show": {
@@ -604,7 +609,13 @@ def format_records_schema(payload: dict[str, Any]) -> str:
         outputs = ", ".join(contract.get("outputs") or [])
         introduced = contract.get("introduced_in") or "-"
         lines.append(f"    {name}: introduced={introduced} outputs={outputs}")
-    lines.append("  shared_payloads: metadata_locator, debug_action, doctor_issue")
+        output_contract = contract.get("output_contract") or {}
+        if output_contract:
+            lines.append("      output_contract:")
+            for output_name in ("readable", "json", "jsonl"):
+                if output_name in output_contract:
+                    lines.append(f"        {output_name}: {output_contract[output_name]}")
+    lines.append("  shared_payloads: metadata_locator, debug_action, doctor_issue, doctor_issue_group")
     non_goals = ", ".join(payload.get("non_goals") or [])
     lines.append(f"  non_goals: {non_goals}")
     return "\n".join(lines)

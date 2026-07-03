@@ -395,6 +395,8 @@ v0.8.12 起，doctor contract 提供稳定示例 payload：`ok`、`warning_group
 
 v0.8.13 起，doctor 输出模式边界固定：`--json` 输出完整 doctor report；`--jsonl` 只输出逐 issue stream，不包含 `issue_groups`、`status_counts`、`metadata_state_counts` 等 summary 字段；readable 输出顺序固定为 summary、status counts、metadata counts、issue groups、issues。
 
+v0.8.14 起，`pdman records schema --surface doctor` 会自描述 doctor 三种输出模式：readable 是人类摘要，`--json` 是完整 report，`--jsonl` 是逐 issue stream。agent 可先读取 schema 判断消费哪种输出，而不需要实际运行 doctor。
+
 `records` 与 `history` 的边界不同：`history` 保留原始运行历史视角和已有 contract；`records` 是 agent-oriented query view，不读取完整 resume/dynamic metadata，不嵌入 metadata 内容，不改变下载、queue 或 run 行为。当前 `cache_root/metadata/<url-hash>/` 只是 locator 使用的 cache layout，不是 database schema；v0.8.x 仍不引入 database/index engine。
 
 ### 本地队列命令

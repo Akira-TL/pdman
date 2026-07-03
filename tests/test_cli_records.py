@@ -459,6 +459,17 @@ def test_cli_records_schema_json_outputs_contract(capsys):
     assert payload["commands"]["show"]["json_shape"]["suggested_debug"] == "list[debug_action]"
 
 
+def test_cli_records_schema_doctor_json_outputs_output_contract(capsys):
+    exit_code = cli.main(["records", "schema", "--surface", "doctor", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    contract = payload["commands"]["doctor"]["output_contract"]
+    assert exit_code == 0
+    assert payload["surface"] == "doctor"
+    assert contract["json"] == "full doctor report with summary fields, issue_groups, and issues"
+    assert contract["jsonl"] == "issue stream only; one doctor_issue per line; no summary or issue_groups fields"
+
+
 def test_cli_records_schema_readable_outputs_summary(capsys):
     exit_code = cli.main(["records", "schema"])
 
@@ -469,6 +480,16 @@ def test_cli_records_schema_readable_outputs_summary(capsys):
     assert "list: introduced=0.8.0" in output
     assert "metadata: introduced=0.8.2" in output
     assert "show: introduced=0.8.3" in output
+
+
+def test_cli_records_schema_doctor_readable_outputs_output_contract(capsys):
+    exit_code = cli.main(["records", "schema", "--surface", "doctor"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "output_contract:" in output
+    assert "jsonl: issue stream only" in output
+    assert "shared_payloads: metadata_locator, debug_action, doctor_issue, doctor_issue_group" in output
 
 
 def test_cli_records_show_json_outputs_one_task(tmp_path, capsys):

@@ -886,6 +886,8 @@ v0.8.12 起，doctor contract 提供稳定示例 payload：`ok`、`warning_group
 
 v0.8.13 起，doctor 输出模式边界固定：`--json` 输出完整 doctor report；`--jsonl` 只输出逐 issue stream，不包含 `issue_groups`、`status_counts`、`metadata_state_counts` 等 summary 字段；readable 输出顺序固定为 summary、status counts、metadata counts、issue groups、issues。
 
+v0.8.14 起，`pdman records schema --surface doctor` 会自描述 doctor 三种输出模式：readable 是人类摘要，`--json` 是完整 report，`--jsonl` 是逐 issue stream。agent 可先读取 schema 判断消费哪种输出，而不需要实际运行 doctor。
+
 Records 与 history/run 的边界：
 
 | Surface | 定位 |
@@ -894,7 +896,7 @@ Records 与 history/run 的边界：
 | `pdman run <run_id>` | 单个 run 的 summary + task 详情视角。 |
 | `pdman records list` | 面向 agent 的 compact task record summary，聚合最小关键字段和诊断 payload。 |
 
-v0.8.13 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
+v0.8.14 明确不提供：database/index engine、完整 metadata 内容嵌入、旧历史迁移、dynamic recovery、metadata validation、metadata repair、自动执行 debug bridge、自动 doctor repair 或 queue schema 变更。这些能力按 v0.8 后续小版本或 v0.9 单独规划。
 
 ### 8.3 Queue foundation
 
