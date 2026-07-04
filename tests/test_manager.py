@@ -7,6 +7,8 @@ from rich.console import Console
 
 from pdman.downloader import Downloader
 from pdman.manager import Manager
+from pdman.output_modes import OutputMode
+from pdman.output_renderers import NoOpProgress, PlainOutputRenderer, RichOutputRenderer
 from pdman.status import TaskReason, TaskResult, TaskStatus
 
 
@@ -38,6 +40,30 @@ def test_max_downloads_limits_url_task_concurrency(tmp_path):
         assert manager._downloaders == []
 
     asyncio.run(run_case())
+
+
+def test_manager_uses_rich_renderer_for_rich_output():
+    manager = Manager(log_path=None, output_mode="rich")
+
+    assert manager.output_mode is OutputMode.RICH
+    assert isinstance(manager._output_renderer, RichOutputRenderer)
+    assert not isinstance(manager._progress, NoOpProgress)
+
+
+def test_manager_uses_plain_renderer_for_non_rich_output():
+    manager = Manager(log_path=None, output_mode="plain")
+
+    assert manager.output_mode is OutputMode.PLAIN
+    assert isinstance(manager._output_renderer, PlainOutputRenderer)
+    assert isinstance(manager._progress, NoOpProgress)
+
+
+def test_manager_uses_plain_renderer_for_structured_output_until_renderer_lands():
+    manager = Manager(log_path=None, output_mode="jsonl")
+
+    assert manager.output_mode is OutputMode.JSONL
+    assert isinstance(manager._output_renderer, PlainOutputRenderer)
+    assert isinstance(manager._progress, NoOpProgress)
 
 
 def test_manager_console_log_sink_does_not_add_blank_lines():

@@ -25,19 +25,10 @@ from urllib.parse import unquote
 from typing import List, Optional, TextIO
 from loguru._logger import Logger, Core
 
-from rich.progress import (
-    Progress,
-    Console,
-    BarColumn,
-    DownloadColumn,
-    TransferSpeedColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-    TextColumn,
-)
 from .chunk import Chunk
 from .downloader import Downloader
 from .output_modes import OutputMode, resolve_output_mode
+from .output_renderers import PlainOutputRenderer, RichOutputRenderer
 from .runtime import RuntimePaths, task_result_to_record, utc_now_iso
 from .status import TaskResult, TaskStatus
 from .task_input import load_task_input
@@ -256,17 +247,11 @@ class Manager:
         self._urls_lock = asyncio.Lock()
         self._urls: dict = {}  # {url: Downloader item, ...}
         """{url: `Downloader` item, ...}"""
-        self._console = Console()
-        self._progress = Progress(
-            TextColumn("[bold blue]{task.description}"),
-            BarColumn(),
-            TextColumn("[bold blue]DL:{task.fields[dl]}"),
-            DownloadColumn(binary_units=True),
-            TransferSpeedColumn(),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
+        self._output_renderer = self._create_output_renderer()
+        self._console = self._output_renderer.create_console()
+        self._progress = self._output_renderer.create_progress(
             console=self._console,
-            refresh_per_second=1.0 / max(self.summary_interval, 0.1),
+            summary_interval=self.summary_interval,
         )
         self._downloader_main = None
         self._downloaders = []
@@ -283,6 +268,11 @@ class Manager:
         }
         # 先设置 summary_interval 再调用 _parse_config（这样 _parse_config 可以用）
         self._parse_config()
+
+    def _create_output_renderer(self):
+        if self.output_mode is OutputMode.RICH:
+            return RichOutputRenderer()
+        return PlainOutputRenderer()
 
     def config(self, **kwargs):
         need_reparse_logging = False

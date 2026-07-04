@@ -7,6 +7,7 @@ from pdman.output_modes import (
     parse_output_mode,
     resolve_output_mode,
 )
+from pdman.output_renderers import NoOpProgress, PlainOutputRenderer, RichOutputRenderer
 
 
 def test_output_mode_choices_are_stable():
@@ -54,3 +55,33 @@ def test_resolve_output_mode_defaults_by_tty():
 )
 def test_is_structured_output(mode, expected):
     assert is_structured_output(mode) is expected
+
+
+def test_noop_progress_accepts_rich_progress_calls():
+    progress = NoOpProgress()
+
+    with progress:
+        task_id = progress.add_task("Downloading file.bin", total=100, dl="0")
+        progress.update(task_id, completed=50, dl="50")
+        progress.stop_task(task_id)
+        assert progress.tasks[task_id]["stopped"] is True
+        progress.remove_task(task_id)
+
+    assert progress.tasks == {}
+
+
+def test_plain_renderer_uses_noop_progress_and_plain_console():
+    renderer = PlainOutputRenderer()
+    console = renderer.create_console()
+    progress = renderer.create_progress(console=console, summary_interval=1.0)
+
+    assert isinstance(progress, NoOpProgress)
+    assert console.is_terminal is False
+
+
+def test_rich_renderer_creates_rich_progress():
+    renderer = RichOutputRenderer()
+    console = renderer.create_console()
+    progress = renderer.create_progress(console=console, summary_interval=1.0)
+
+    assert not isinstance(progress, NoOpProgress)
