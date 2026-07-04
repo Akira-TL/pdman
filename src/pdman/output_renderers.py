@@ -59,11 +59,7 @@ class NoOpProgress:
 
 
 class PlainOutputRenderer:
-    """ANSI-free output boundary for log-oriented modes.
-
-    v0.9.2 only provides a no-op progress sink. Lifecycle lines and structured
-    summaries are intentionally left for later v0.9 stages.
-    """
+    """ANSI-free output boundary for log-oriented modes."""
 
     mode = "plain"
 
@@ -72,6 +68,21 @@ class PlainOutputRenderer:
 
     def create_progress(self, *, console: Console, summary_interval: float) -> NoOpProgress:
         return NoOpProgress()
+
+    def run_started(self, *, console: Console, run_id: str) -> None:
+        console.print(f"Run started: {run_id}")
+
+    def task_finished(self, *, console: Console, result: Any, task_id: str) -> None:
+        status = getattr(result.status, "value", str(result.status))
+        name = result.filename or result.url
+        detail = result.reason or result.error
+        line = f"Task {status}: {name} task_id={task_id}"
+        if detail:
+            line = f"{line} reason={detail}"
+        console.print(line)
+
+    def run_finished(self, *, console: Console, summary: str) -> None:
+        console.print(summary)
 
 
 class RichOutputRenderer:
@@ -94,3 +105,12 @@ class RichOutputRenderer:
             console=console,
             refresh_per_second=1.0 / max(summary_interval, 0.1),
         )
+
+    def run_started(self, *, console: Console, run_id: str) -> None:
+        return None
+
+    def task_finished(self, *, console: Console, result: Any, task_id: str) -> None:
+        return None
+
+    def run_finished(self, *, console: Console, summary: str) -> None:
+        console.print(summary)

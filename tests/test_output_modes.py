@@ -79,6 +79,31 @@ def test_plain_renderer_uses_noop_progress_and_plain_console():
     assert console.is_terminal is False
 
 
+def test_plain_renderer_formats_lifecycle_lines(capsys):
+    renderer = PlainOutputRenderer()
+    console = renderer.create_console()
+    result = type(
+        "Result",
+        (),
+        {
+            "status": OutputMode.PLAIN,
+            "filename": "file.bin",
+            "url": "https://example.com/file.bin",
+            "reason": "download completed",
+            "error": None,
+        },
+    )()
+
+    renderer.run_started(console=console, run_id="run-1")
+    renderer.task_finished(console=console, result=result, task_id="abc123")
+    renderer.run_finished(console=console, summary="Summary:\n  completed: 1")
+
+    output = capsys.readouterr().out
+    assert "Run started: run-1" in output
+    assert "Task plain: file.bin task_id=abc123 reason=download completed" in output
+    assert "Summary:" in output
+
+
 def test_rich_renderer_creates_rich_progress():
     renderer = RichOutputRenderer()
     console = renderer.create_console()

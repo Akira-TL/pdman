@@ -274,6 +274,12 @@ class Manager:
             return RichOutputRenderer()
         return PlainOutputRenderer()
 
+    def _should_emit_plain_lifecycle(self) -> bool:
+        return self.output_mode is OutputMode.PLAIN
+
+    def _should_emit_human_summary(self) -> bool:
+        return self.output_mode in {OutputMode.RICH, OutputMode.PLAIN}
+
     def config(self, **kwargs):
         need_reparse_logging = False
         need_reparse_download = False
@@ -656,6 +662,11 @@ class Manager:
         self.run_finished_at = None
         self._runtime_active = True
         self._write_active_run()
+        if self._should_emit_plain_lifecycle():
+            self._output_renderer.run_started(
+                console=self._console,
+                run_id=self.run_id,
+            )
 
     def _finish_runtime_run(self) -> None:
         self.run_finished_at = utc_now_iso()
@@ -688,9 +699,9 @@ class Manager:
             self.results.append(result)
             if result.status == TaskStatus.FAILED:
                 self.exit_code = 1
+            task_id = self._task_id_for_url(result.url)
             if self._runtime_active:
                 finished_at = utc_now_iso()
-                task_id = self._task_id_for_url(result.url)
                 self.runtime_paths.append_history(
                     task_result_to_record(
                         run_id=self.run_id,
@@ -701,6 +712,12 @@ class Manager:
                     )
                 )
                 self._write_active_run()
+            if self._should_emit_plain_lifecycle():
+                self._output_renderer.task_finished(
+                    console=self._console,
+                    result=result,
+                    task_id=task_id,
+                )
 
     def summarize_results(self) -> str:
         completed = [
@@ -745,8 +762,11 @@ class Manager:
         return "\n".join(lines)
 
     def print_summary(self) -> None:
-        if self.results:
-            self._console.print(self.summarize_results())
+        if self.results and self._should_emit_human_summary():
+            self._output_renderer.run_finished(
+                console=self._console,
+                summary=self.summarize_results(),
+            )
 
     async def wait(self) -> None:
         while self._downloaders:

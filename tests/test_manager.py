@@ -66,6 +66,78 @@ def test_manager_uses_plain_renderer_for_structured_output_until_renderer_lands(
     assert isinstance(manager._progress, NoOpProgress)
 
 
+def test_manager_plain_output_emits_low_frequency_lifecycle_lines():
+    capture = StringIO()
+    manager = Manager(log_path=None, output_mode="plain")
+    manager._console = Console(file=capture, force_terminal=False, width=120)
+
+    manager._start_runtime_run()
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        )
+    )
+    manager.print_summary()
+
+    output = capture.getvalue()
+    assert f"Run started: {manager.run_id}" in output
+    assert "Task completed: ok.bin" in output
+    assert "task_id=" in output
+    assert "reason=download completed" in output
+    assert "Summary:" in output
+    assert "completed: 1" in output
+
+
+def test_manager_structured_output_suppresses_human_lifecycle_lines():
+    capture = StringIO()
+    manager = Manager(log_path=None, output_mode="jsonl")
+    manager._console = Console(file=capture, force_terminal=False, width=120)
+
+    manager._start_runtime_run()
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        )
+    )
+    manager.print_summary()
+
+    assert capture.getvalue() == ""
+
+
+def test_manager_rich_output_keeps_summary_without_plain_lifecycle_lines():
+    capture = StringIO()
+    manager = Manager(log_path=None, output_mode="rich")
+    manager._console = Console(file=capture, force_terminal=False, width=120)
+
+    manager._start_runtime_run()
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        )
+    )
+    manager.print_summary()
+
+    output = capture.getvalue()
+    assert "Run started:" not in output
+    assert "Task completed:" not in output
+    assert "Summary:" in output
+
+
 def test_manager_console_log_sink_does_not_add_blank_lines():
     capture = StringIO()
     manager = Manager(log_path=None)
