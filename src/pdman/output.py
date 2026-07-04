@@ -4,8 +4,12 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from .output_modes import OUTPUT_MODE_CHOICES
 from .queue import QueueRecord, QueueValidationReport
 from .status import TaskResult, TaskStatus
+
+
+OUTPUT_CONTRACT_SCHEMA_VERSION = 1
 
 
 def print_json(data: dict[str, Any]) -> None:
@@ -180,6 +184,123 @@ def download_run_finished_event(
         "finished_at": finished_at,
         "counts": counts,
     }
+
+
+def output_schema_payload() -> dict[str, Any]:
+    return {
+        "surface": "output",
+        "schema_version": OUTPUT_CONTRACT_SCHEMA_VERSION,
+        "modes": {
+            mode: {
+                "structured": mode in {"json", "jsonl"},
+                "stdout_contract": {
+                    "rich": "interactive Rich progress and human summary",
+                    "plain": "ANSI-free lifecycle lines and human summary",
+                    "json": "one final download_summary JSON object",
+                    "jsonl": "one compact JSON event object per line",
+                }[mode],
+            }
+            for mode in OUTPUT_MODE_CHOICES
+        },
+        "default_resolution": [
+            "explicit --output selection",
+            "TTY default: rich",
+            "non-TTY default: plain",
+        ],
+        "json": {
+            "schema_version": 1,
+            "kind": "download_summary",
+            "fields": [
+                "schema_version",
+                "kind",
+                "run_id",
+                "status",
+                "exit_code",
+                "started_at",
+                "finished_at",
+                "counts",
+                "tasks",
+            ],
+            "counts_fields": ["completed", "skipped", "failed"],
+            "task_fields": [
+                "task_id",
+                "url",
+                "filename",
+                "status",
+                "reason_code",
+                "reason",
+                "error",
+                "downloaded_bytes",
+                "total_bytes",
+                "resume_rejection",
+                "header_probe",
+                "network_error",
+            ],
+        },
+        "jsonl": {
+            "schema_version": 1,
+            "event_kinds": [
+                "run_started",
+                "task_finished",
+                "run_finished",
+            ],
+            "common_fields": ["schema_version", "event", "run_id"],
+            "events": {
+                "run_started": ["schema_version", "event", "run_id", "started_at"],
+                "task_finished": [
+                    "schema_version",
+                    "event",
+                    "run_id",
+                    "task_id",
+                    "task",
+                ],
+                "run_finished": [
+                    "schema_version",
+                    "event",
+                    "run_id",
+                    "status",
+                    "exit_code",
+                    "started_at",
+                    "finished_at",
+                    "counts",
+                ],
+            },
+            "not_yet_emitted": [
+                "progress",
+                "retry",
+                "worker",
+                "range",
+                "chunk",
+            ],
+        },
+    }
+
+
+def format_output_schema(payload: dict[str, Any]) -> str:
+    lines = [
+        "Output schema:",
+        f"  schema_version: {payload['schema_version']}",
+        "  modes:",
+    ]
+    for mode, contract in payload["modes"].items():
+        structured = "structured" if contract["structured"] else "human"
+        lines.append(f"    {mode}: {structured}; {contract['stdout_contract']}")
+    lines.append("  default_resolution:")
+    for item in payload["default_resolution"]:
+        lines.append(f"    - {item}")
+    lines.extend(
+        [
+            "  json:",
+            f"    kind: {payload['json']['kind']}",
+            "    fields: " + ", ".join(payload["json"]["fields"]),
+            "    task_fields: " + ", ".join(payload["json"]["task_fields"]),
+            "  jsonl:",
+            "    event_kinds: " + ", ".join(payload["jsonl"]["event_kinds"]),
+            "    common_fields: " + ", ".join(payload["jsonl"]["common_fields"]),
+            "    not_yet_emitted: " + ", ".join(payload["jsonl"]["not_yet_emitted"]),
+        ]
+    )
+    return "\n".join(lines)
 
 
 def history_records_payload(

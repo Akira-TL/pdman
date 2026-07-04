@@ -66,6 +66,39 @@ def test_cli_output_mode_rejects_invalid_value():
         cli.main(["--output", "xml", "https://example.com/file.bin"])
 
 
+def test_cli_output_schema_json(capsys):
+    exit_code = cli.main(["output", "schema", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["surface"] == "output"
+    assert payload["modes"]["jsonl"]["structured"] is True
+    assert payload["json"]["kind"] == "download_summary"
+    assert payload["jsonl"]["event_kinds"] == [
+        "run_started",
+        "task_finished",
+        "run_finished",
+    ]
+
+
+def test_cli_output_schema_readable(capsys):
+    exit_code = cli.main(["output", "schema"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Output schema:" in output
+    assert "default_resolution:" in output
+    assert "event_kinds: run_started, task_finished, run_finished" in output
+
+
+def test_cli_output_requires_schema(capsys):
+    exit_code = cli.main(["output"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Output command required: schema" in output
+
+
 def test_cli_input_schema_json(capsys):
     exit_code = cli.main(["input", "schema", "--json"])
 

@@ -5,9 +5,11 @@ from pdman.output import (
     download_run_started_event,
     download_summary_payload,
     download_task_finished_event,
+    format_output_schema,
     history_records_payload,
     header_probe_payload,
     network_error_payload,
+    output_schema_payload,
     print_json_line,
     print_jsonl,
     run_detail_payload,
@@ -124,6 +126,40 @@ def test_network_error_payload_from_task_result_and_history_record():
         "http_status": None,
     }
 
+
+
+def test_output_schema_payload_describes_modes_and_contracts():
+    payload = output_schema_payload()
+
+    assert payload["surface"] == "output"
+    assert payload["schema_version"] == 1
+    assert list(payload["modes"].keys()) == ["rich", "plain", "json", "jsonl"]
+    assert payload["modes"]["json"]["structured"] is True
+    assert payload["modes"]["plain"]["structured"] is False
+    assert payload["default_resolution"] == [
+        "explicit --output selection",
+        "TTY default: rich",
+        "non-TTY default: plain",
+    ]
+    assert payload["json"]["kind"] == "download_summary"
+    assert "tasks" in payload["json"]["fields"]
+    assert "resume_rejection" in payload["json"]["task_fields"]
+    assert payload["jsonl"]["event_kinds"] == [
+        "run_started",
+        "task_finished",
+        "run_finished",
+    ]
+    assert "progress" in payload["jsonl"]["not_yet_emitted"]
+
+
+def test_format_output_schema_readable_summary():
+    output = format_output_schema(output_schema_payload())
+
+    assert "Output schema:" in output
+    assert "rich: human; interactive Rich progress and human summary" in output
+    assert "json: structured; one final download_summary JSON object" in output
+    assert "event_kinds: run_started, task_finished, run_finished" in output
+    assert "not_yet_emitted: progress, retry, worker, range, chunk" in output
 
 
 def test_task_result_payload_includes_download_diagnostics():

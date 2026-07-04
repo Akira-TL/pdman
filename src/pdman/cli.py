@@ -22,7 +22,9 @@ from .history import (
 from .manager import Manager
 from .output_modes import OUTPUT_MODE_CHOICES, resolve_output_mode
 from .output import (
+    format_output_schema,
     history_records_payload,
+    output_schema_payload,
     print_json,
     run_detail_payload,
     print_jsonl,
@@ -218,6 +220,30 @@ def handle_input_command(argv=None) -> int:
     if command == "examples":
         return handle_input_examples_command(rest)
     print(f"Unknown input command: {command}")
+    return 1
+
+
+def handle_output_schema_command(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="pdman output schema")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    payload = output_schema_payload()
+    if args.json:
+        print_json(payload)
+        return 0
+    print(format_output_schema(payload))
+    return 0
+
+
+def handle_output_command(argv=None) -> int:
+    argv = list(argv or [])
+    if not argv:
+        print("Output command required: schema")
+        return 1
+    command, rest = argv[0], argv[1:]
+    if command == "schema":
+        return handle_output_schema_command(rest)
+    print(f"Unknown output command: {command}")
     return 1
 
 
@@ -914,6 +940,8 @@ def handle_subcommand(argv=None) -> int:
         return handle_run_command(rest)
     if command == "input":
         return handle_input_command(rest)
+    if command == "output":
+        return handle_output_command(rest)
     if command == "queue":
         return handle_queue_command(rest)
     if command == "debug":
@@ -925,7 +953,7 @@ def handle_subcommand(argv=None) -> int:
 
 def main(argv=None):
     argv = list(argv) if argv is not None else sys.argv[1:]
-    if argv and argv[0] in {"history", "runs", "run", "input", "queue", "debug", "records"}:
+    if argv and argv[0] in {"history", "runs", "run", "input", "output", "queue", "debug", "records"}:
         return handle_subcommand(argv)
 
     parser = argparse.ArgumentParser()
