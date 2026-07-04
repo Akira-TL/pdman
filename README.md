@@ -147,6 +147,35 @@ pdman -i tasks.yaml --group nt-db
 
 schema v2 的 `file_name`、`dir_path`、`md5`、`log_path` 会进入实际 task；其他字段会先保存在解析后的 `options` 中，当前版本不把它们映射成 per-task 下载行为。v0.8.19 起，可用 `pdman input schema` 或 `pdman input schema --json` 查看输入格式和 YAML schema v2 的稳定 contract。
 
+### 主下载输出模式
+
+v0.9 起，主下载入口支持显式输出模式：
+
+```bash
+pdman --output rich "https://example.com/file.bin"
+pdman --output plain "https://example.com/file.bin"
+pdman --output json "https://example.com/file.bin"
+pdman --output jsonl "https://example.com/file.bin"
+```
+
+默认规则：显式 `--output` 优先；TTY 默认 `rich`；非 TTY 默认 `plain`。
+
+| 模式 | 适用场景 | stdout contract |
+| --- | --- | --- |
+| `rich` | 交互式终端 | Rich progress 和人类 summary |
+| `plain` | CI / nohup / 日志 | 无 ANSI 的低频 lifecycle 行和 summary |
+| `json` | 脚本读取最终结果 | 单个 `download_summary` JSON object |
+| `jsonl` | agent / 长任务自动化 | 每行一个 JSON event，目前包含 `run_started`、`task_finished`、`run_finished` |
+
+可以不启动下载直接查看输出 contract：
+
+```bash
+pdman output schema
+pdman output schema --json
+```
+
+`jsonl` 当前只输出低频事件，不输出 progress / retry / range / chunk 事件。需要实时进度事件时，应等待后续版本的 throttled progress event contract。
+
 ---
 
 ## 常用命令

@@ -29,6 +29,7 @@
 | `-v, --version` | 输出版本号后退出 |
 | `-l, --log PATH` | 指定日志文件；`-` 表示输出到 stdout |
 | `--debug` | 启用 DEBUG 级别日志 |
+| `--output rich\|plain\|json\|jsonl` | 选择主下载输出模式；TTY 默认 `rich`，非 TTY 默认 `plain` |
 | `-d, --dir DIR` | 指定下载目录 |
 | `-o, --out NAME` | 指定单 URL 下载的输出文件名 |
 | `urls...` | 一个或多个待下载 URL |
@@ -565,7 +566,50 @@ v0.3.3 引入运行时任务结果模型，用于区分任务是完成、按用�
 | `1` | 一个或多个任务 failed |
 | `130` | 用户中断 |
 
-### 7.1 v0.3.3 手动验证说明
+### 7.1 主下载输出模式与 agent contract
+
+v0.9.x 引入主下载入口的输出模式 contract：
+
+```bash
+pdman --output rich URL
+pdman --output plain URL
+pdman --output json URL
+pdman --output jsonl URL
+```
+
+默认解析规则固定为：显式 `--output` 优先；TTY 默认 `rich`；非 TTY 默认 `plain`。
+
+| 模式 | stdout contract | 说明 |
+| --- | --- | --- |
+| `rich` | Rich progress 和人类 summary | 交互式终端默认模式 |
+| `plain` | 无 ANSI lifecycle 行和 summary | 适合 CI、nohup、日志和重定向 |
+| `json` | 一个最终 `download_summary` JSON object | 适合脚本读取最终结果 |
+| `jsonl` | 每行一个 JSON event | 适合 agent 或长任务自动化增量消费 |
+
+`json` summary 包含 `schema_version=1`、`kind=download_summary`、`run_id`、`status`、`exit_code`、`started_at`、`finished_at`、`counts` 和 `tasks`。每个 task 包含 `task_id`、`url`、`filename`、终态 `status`、reason/error、byte counts，以及 `resume_rejection`、`header_probe`、`network_error` 诊断 payload。
+
+`jsonl` 当前只输出低频事件：
+
+```text
+run_started
+task_finished
+run_finished
+```
+
+每个事件都包含 `schema_version`、`event` 和 `run_id`。`task_finished` 额外包含 `task_id` 和 task payload；`run_finished` 包含终态 status、exit code、timestamps 和 counts。v0.9.5 暂不输出 progress、retry、worker、range 或 chunk 事件，避免未节流事件流在大文件多连接下载中刷屏。
+
+可以在不运行下载的情况下查看 contract：
+
+```bash
+pdman output schema
+pdman output schema --json
+```
+
+`pdman output schema --json` 面向脚本和 agent，描述 modes、默认解析、JSON summary 字段、JSONL event kinds、per-event fields 和尚未输出的事件类型。它是只读 inspection surface，不触发下载、不写 runtime、不修改 history。
+
+现有子命令级 `--json` / `--jsonl` 不被主下载 `--output` 替代；例如 `history`、`queue`、`debug`、`records` 和 `input` 的结构化输出 contract 仍保持各自命令原有边界。
+
+### 7.2 v0.3.3 手动验证说明
 
 本节记录维护者手动执行的 v0.3.3 验证项，用来补充自动化测试。保留这些用例的目的是明确确认 CLI 退出码传递和 MD5 mismatch 失败语义。
 

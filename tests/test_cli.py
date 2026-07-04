@@ -66,6 +66,26 @@ def test_cli_output_mode_rejects_invalid_value():
         cli.main(["--output", "xml", "https://example.com/file.bin"])
 
 
+def test_cli_output_json_help_smoke(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--output", "json", "--help"])
+
+    output = capsys.readouterr().out
+    assert exc_info.value.code == 0
+    assert "--output" in output
+    assert "{rich,plain,json,jsonl}" in output
+
+
+def test_cli_output_jsonl_help_smoke(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--output", "jsonl", "--help"])
+
+    output = capsys.readouterr().out
+    assert exc_info.value.code == 0
+    assert "--output" in output
+    assert "{rich,plain,json,jsonl}" in output
+
+
 def test_cli_output_schema_json(capsys):
     exit_code = cli.main(["output", "schema", "--json"])
 
