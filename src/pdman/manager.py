@@ -27,7 +27,14 @@ from loguru._logger import Logger, Core
 
 from .chunk import Chunk
 from .downloader import Downloader
-from .output import download_summary_payload, print_json
+from .output import (
+    download_run_finished_event,
+    download_run_started_event,
+    download_summary_payload,
+    download_task_finished_event,
+    print_json,
+    print_json_line,
+)
 from .output_modes import OutputMode, resolve_output_mode
 from .output_renderers import PlainOutputRenderer, RichOutputRenderer, StructuredOutputRenderer
 from .runtime import RuntimePaths, task_result_to_record, utc_now_iso
@@ -285,6 +292,9 @@ class Manager:
 
     def _should_emit_json_summary(self) -> bool:
         return self.output_mode is OutputMode.JSON
+
+    def _should_emit_jsonl_events(self) -> bool:
+        return self.output_mode is OutputMode.JSONL
 
     def config(self, **kwargs):
         need_reparse_logging = False
@@ -668,7 +678,14 @@ class Manager:
         self.run_finished_at = None
         self._runtime_active = True
         self._write_active_run()
-        if self._should_emit_plain_lifecycle():
+        if self._should_emit_jsonl_events():
+            print_json_line(
+                download_run_started_event(
+                    run_id=self.run_id,
+                    started_at=self.run_started_at,
+                )
+            )
+        elif self._should_emit_plain_lifecycle():
             self._output_renderer.run_started(
                 console=self._console,
                 run_id=self.run_id,
@@ -718,7 +735,15 @@ class Manager:
                     )
                 )
                 self._write_active_run()
-            if self._should_emit_plain_lifecycle():
+            if self._should_emit_jsonl_events():
+                print_json_line(
+                    download_task_finished_event(
+                        run_id=self.run_id,
+                        result=result,
+                        task_id=task_id,
+                    )
+                )
+            elif self._should_emit_plain_lifecycle():
                 self._output_renderer.task_finished(
                     console=self._console,
                     result=result,
@@ -777,6 +802,17 @@ class Manager:
                     results=self.results,
                     exit_code=self.exit_code,
                     task_id_for_url=self._task_id_for_url,
+                    started_at=self.run_started_at,
+                    finished_at=self.run_finished_at,
+                )
+            )
+            return
+        if self._should_emit_jsonl_events():
+            print_json_line(
+                download_run_finished_event(
+                    run_id=self.run_id,
+                    results=self.results,
+                    exit_code=self.exit_code,
                     started_at=self.run_started_at,
                     finished_at=self.run_finished_at,
                 )

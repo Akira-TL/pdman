@@ -14,7 +14,11 @@ def print_json(data: dict[str, Any]) -> None:
 
 def print_jsonl(records: list[dict[str, Any]]) -> None:
     for record in records:
-        print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+        print_json_line(record)
+
+
+def print_json_line(data: dict[str, Any]) -> None:
+    print(json.dumps(data, ensure_ascii=False, sort_keys=True))
 
 
 def resume_rejection_payload(source: TaskResult | dict[str, Any]) -> dict[str, Any]:
@@ -87,6 +91,18 @@ def task_result_payload(
     }
 
 
+def download_result_counts(results: list[TaskResult]) -> dict[str, int]:
+    return {
+        "completed": sum(1 for result in results if result.status == TaskStatus.COMPLETED),
+        "skipped": sum(1 for result in results if result.status == TaskStatus.SKIPPED),
+        "failed": sum(1 for result in results if result.status == TaskStatus.FAILED),
+    }
+
+
+def download_run_status(*, counts: dict[str, int], exit_code: int) -> str:
+    return "failed" if exit_code != 0 or counts["failed"] else "completed"
+
+
 def download_summary_payload(
     *,
     run_id: str,
@@ -96,12 +112,8 @@ def download_summary_payload(
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> dict[str, Any]:
-    counts = {
-        "completed": sum(1 for result in results if result.status == TaskStatus.COMPLETED),
-        "skipped": sum(1 for result in results if result.status == TaskStatus.SKIPPED),
-        "failed": sum(1 for result in results if result.status == TaskStatus.FAILED),
-    }
-    status = "failed" if exit_code != 0 or counts["failed"] else "completed"
+    counts = download_result_counts(results)
+    status = download_run_status(counts=counts, exit_code=exit_code)
     return {
         "schema_version": 1,
         "kind": "download_summary",
@@ -118,6 +130,55 @@ def download_summary_payload(
             )
             for result in results
         ],
+    }
+
+
+def download_run_started_event(
+    *,
+    run_id: str,
+    started_at: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "event": "run_started",
+        "run_id": run_id,
+        "started_at": started_at,
+    }
+
+
+def download_task_finished_event(
+    *,
+    run_id: str,
+    result: TaskResult,
+    task_id: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "event": "task_finished",
+        "run_id": run_id,
+        "task_id": task_id,
+        "task": task_result_payload(result, task_id=task_id),
+    }
+
+
+def download_run_finished_event(
+    *,
+    run_id: str,
+    results: list[TaskResult],
+    exit_code: int,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+) -> dict[str, Any]:
+    counts = download_result_counts(results)
+    return {
+        "schema_version": 1,
+        "event": "run_finished",
+        "run_id": run_id,
+        "status": download_run_status(counts=counts, exit_code=exit_code),
+        "exit_code": exit_code,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "counts": counts,
     }
 
 

@@ -130,7 +130,42 @@ def test_manager_json_output_emits_final_summary_only(capsys):
     assert payload["tasks"][0]["resume_rejection"]["present"] is False
 
 
-def test_manager_structured_output_suppresses_human_lifecycle_lines():
+def test_manager_jsonl_output_emits_low_frequency_events(capsys):
+    manager = Manager(log_path=None, output_mode="jsonl")
+
+    manager._start_runtime_run()
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        )
+    )
+    manager.run_finished_at = "2026-07-04T00:00:01Z"
+    manager.print_summary()
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 3
+    events = [json.loads(line) for line in lines]
+    assert [event["event"] for event in events] == [
+        "run_started",
+        "task_finished",
+        "run_finished",
+    ]
+    assert all(event["schema_version"] == 1 for event in events)
+    assert all(event["run_id"] == manager.run_id for event in events)
+    assert events[1]["task_id"] == manager._task_id_for_url(
+        "https://example.com/ok.bin"
+    )
+    assert events[1]["task"]["status"] == "completed"
+    assert events[2]["counts"] == {"completed": 1, "skipped": 0, "failed": 0}
+    assert events[2]["status"] == "completed"
+
+
+def test_manager_jsonl_output_does_not_write_human_console_text():
     capture = StringIO()
     manager = Manager(log_path=None, output_mode="jsonl")
     manager._console = Console(file=capture, force_terminal=False, width=120)

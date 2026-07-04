@@ -1,10 +1,14 @@
 import json
 
 from pdman.output import (
+    download_run_finished_event,
+    download_run_started_event,
     download_summary_payload,
+    download_task_finished_event,
     history_records_payload,
     header_probe_payload,
     network_error_payload,
+    print_json_line,
     print_jsonl,
     run_detail_payload,
     resume_rejection_payload,
@@ -195,6 +199,65 @@ def test_download_summary_payload_includes_counts_and_tasks():
     assert payload["tasks"][0]["status"] == "completed"
     assert payload["tasks"][1]["task_id"] == "id-bad"
     assert payload["tasks"][1]["reason_code"] == "http_status"
+
+
+def test_download_jsonl_event_payloads_are_line_oriented_contracts():
+    result = TaskResult(
+        url="https://example.com/ok.bin",
+        filename="ok.bin",
+        status=TaskStatus.COMPLETED,
+        reason="download completed",
+        downloaded_bytes=1024,
+        total_bytes=1024,
+    )
+
+    started = download_run_started_event(
+        run_id="run-1",
+        started_at="2026-07-04T00:00:00Z",
+    )
+    task = download_task_finished_event(
+        run_id="run-1",
+        result=result,
+        task_id="abc123",
+    )
+    finished = download_run_finished_event(
+        run_id="run-1",
+        results=[result],
+        exit_code=0,
+        started_at="2026-07-04T00:00:00Z",
+        finished_at="2026-07-04T00:00:01Z",
+    )
+
+    assert started == {
+        "schema_version": 1,
+        "event": "run_started",
+        "run_id": "run-1",
+        "started_at": "2026-07-04T00:00:00Z",
+    }
+    assert task["schema_version"] == 1
+    assert task["event"] == "task_finished"
+    assert task["run_id"] == "run-1"
+    assert task["task_id"] == "abc123"
+    assert task["task"]["status"] == "completed"
+    assert task["task"]["task_id"] == "abc123"
+    assert finished == {
+        "schema_version": 1,
+        "event": "run_finished",
+        "run_id": "run-1",
+        "status": "completed",
+        "exit_code": 0,
+        "started_at": "2026-07-04T00:00:00Z",
+        "finished_at": "2026-07-04T00:00:01Z",
+        "counts": {"completed": 1, "skipped": 0, "failed": 0},
+    }
+
+
+def test_print_json_line_emits_one_compact_json_object(capsys):
+    print_json_line({"event": "run_started", "run_id": "run-1"})
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {"event": "run_started", "run_id": "run-1"}
 
 
 def test_history_records_payload_includes_resume_diagnostics():
