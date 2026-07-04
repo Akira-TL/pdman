@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdman"
-version = "0.9.3"
+version = "0.9.4"
 description = "Parallel segmented downloader inspired by IDM, with CLI and Python API."
 readme = "README.md"
 authors = [{ name = "Akira_TL" }]

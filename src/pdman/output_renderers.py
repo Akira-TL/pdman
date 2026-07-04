@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from itertools import count
 from typing import Any
 
@@ -83,6 +84,24 @@ class PlainOutputRenderer:
 
     def run_finished(self, *, console: Console, summary: str) -> None:
         console.print(summary)
+
+
+class StructuredOutputRenderer(PlainOutputRenderer):
+    """No-op progress boundary for machine-readable stdout modes."""
+
+    mode = "structured"
+
+    def create_console(self) -> Console:
+        return Console(file=sys.stderr, force_terminal=False, color_system=None)
+
+    def run_started(self, *, console: Console, run_id: str) -> None:
+        return None
+
+    def task_finished(self, *, console: Console, result: Any, task_id: str) -> None:
+        return None
+
+    def run_finished(self, *, console: Console, summary: str) -> None:
+        return None
 
 
 class RichOutputRenderer:

@@ -7,7 +7,12 @@ from pdman.output_modes import (
     parse_output_mode,
     resolve_output_mode,
 )
-from pdman.output_renderers import NoOpProgress, PlainOutputRenderer, RichOutputRenderer
+from pdman.output_renderers import (
+    NoOpProgress,
+    PlainOutputRenderer,
+    RichOutputRenderer,
+    StructuredOutputRenderer,
+)
 
 
 def test_output_mode_choices_are_stable():
@@ -102,6 +107,21 @@ def test_plain_renderer_formats_lifecycle_lines(capsys):
     assert "Run started: run-1" in output
     assert "Task plain: file.bin task_id=abc123 reason=download completed" in output
     assert "Summary:" in output
+
+
+def test_structured_renderer_uses_noop_progress_and_stderr_console(capsys):
+    renderer = StructuredOutputRenderer()
+    console = renderer.create_console()
+    progress = renderer.create_progress(console=console, summary_interval=1.0)
+
+    renderer.run_started(console=console, run_id="run-1")
+    renderer.run_finished(console=console, summary="Summary:")
+
+    captured = capsys.readouterr()
+    assert isinstance(progress, NoOpProgress)
+    assert console.is_terminal is False
+    assert captured.out == ""
+    assert captured.err == ""
 
 
 def test_rich_renderer_creates_rich_progress():

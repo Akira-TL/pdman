@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from .queue import QueueRecord, QueueValidationReport
-from .status import TaskResult
+from .status import TaskResult, TaskStatus
 
 
 def print_json(data: dict[str, Any]) -> None:
@@ -58,6 +59,65 @@ def network_error_payload(source: TaskResult | dict[str, Any]) -> dict[str, Any]
         "phase": phase,
         "kind": kind,
         "http_status": http_status,
+    }
+
+
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def task_result_payload(
+    result: TaskResult,
+    *,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "url": result.url,
+        "filename": result.filename,
+        "status": _enum_value(result.status),
+        "reason_code": _enum_value(result.reason_code),
+        "reason": result.reason,
+        "error": result.error,
+        "downloaded_bytes": result.downloaded_bytes,
+        "total_bytes": result.total_bytes,
+        "resume_rejection": resume_rejection_payload(result),
+        "header_probe": header_probe_payload(result),
+        "network_error": network_error_payload(result),
+    }
+
+
+def download_summary_payload(
+    *,
+    run_id: str,
+    results: list[TaskResult],
+    exit_code: int,
+    task_id_for_url: Callable[[str], str] | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+) -> dict[str, Any]:
+    counts = {
+        "completed": sum(1 for result in results if result.status == TaskStatus.COMPLETED),
+        "skipped": sum(1 for result in results if result.status == TaskStatus.SKIPPED),
+        "failed": sum(1 for result in results if result.status == TaskStatus.FAILED),
+    }
+    status = "failed" if exit_code != 0 or counts["failed"] else "completed"
+    return {
+        "schema_version": 1,
+        "kind": "download_summary",
+        "run_id": run_id,
+        "status": status,
+        "exit_code": exit_code,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "counts": counts,
+        "tasks": [
+            task_result_payload(
+                result,
+                task_id=task_id_for_url(result.url) if task_id_for_url else None,
+            )
+            for result in results
+        ],
     }
 
 

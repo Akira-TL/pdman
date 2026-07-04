@@ -1,12 +1,14 @@
 import json
 
 from pdman.output import (
+    download_summary_payload,
     history_records_payload,
     header_probe_payload,
     network_error_payload,
     print_jsonl,
     run_detail_payload,
     resume_rejection_payload,
+    task_result_payload,
     queue_add_payload,
     queue_clear_payload,
     queue_records_payload,
@@ -16,7 +18,7 @@ from pdman.output import (
     validation_report_payload,
 )
 from pdman.queue import QueueRecord, QueueValidationIssue, QueueValidationReport
-from pdman.status import TaskResult, TaskStatus
+from pdman.status import TaskReason, TaskResult, TaskStatus
 
 
 def test_resume_rejection_payload_from_task_result():
@@ -118,6 +120,81 @@ def test_network_error_payload_from_task_result_and_history_record():
         "http_status": None,
     }
 
+
+
+def test_task_result_payload_includes_download_diagnostics():
+    result = TaskResult(
+        url="https://example.com/file.bin",
+        filename="file.bin",
+        status=TaskStatus.FAILED,
+        reason="HTTP 503 during header check",
+        reason_code=TaskReason.HTTP_STATUS,
+        downloaded_bytes=128,
+        total_bytes=1024,
+        header_probe_method="GET",
+        header_probe_fallback_reason="head_http_405",
+        network_error_phase="header_get_probe",
+        network_error_kind="http_status",
+        network_http_status=503,
+        resume_rejection_code="file_size_mismatch",
+        resume_rejection_reason="Resume rejected [file_size_mismatch]: file_size mismatch",
+    )
+
+    payload = task_result_payload(result, task_id="abc123")
+
+    assert payload["task_id"] == "abc123"
+    assert payload["url"] == "https://example.com/file.bin"
+    assert payload["filename"] == "file.bin"
+    assert payload["status"] == "failed"
+    assert payload["reason_code"] == "http_status"
+    assert payload["reason"] == "HTTP 503 during header check"
+    assert payload["downloaded_bytes"] == 128
+    assert payload["total_bytes"] == 1024
+    assert payload["resume_rejection"]["present"] is True
+    assert payload["header_probe"]["fallback_used"] is True
+    assert payload["network_error"]["http_status"] == 503
+
+
+def test_download_summary_payload_includes_counts_and_tasks():
+    results = [
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        ),
+        TaskResult(
+            url="https://example.com/bad.bin",
+            filename="bad.bin",
+            status=TaskStatus.FAILED,
+            reason="HTTP 503 during header check",
+            reason_code=TaskReason.HTTP_STATUS,
+        ),
+    ]
+
+    payload = download_summary_payload(
+        run_id="run-1",
+        results=results,
+        exit_code=1,
+        task_id_for_url=lambda url: "id-" + url.rsplit("/", 1)[-1].split(".", 1)[0],
+        started_at="2026-07-04T00:00:00Z",
+        finished_at="2026-07-04T00:00:01Z",
+    )
+
+    assert payload["schema_version"] == 1
+    assert payload["kind"] == "download_summary"
+    assert payload["run_id"] == "run-1"
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == 1
+    assert payload["started_at"] == "2026-07-04T00:00:00Z"
+    assert payload["finished_at"] == "2026-07-04T00:00:01Z"
+    assert payload["counts"] == {"completed": 1, "skipped": 0, "failed": 1}
+    assert payload["tasks"][0]["task_id"] == "id-ok"
+    assert payload["tasks"][0]["status"] == "completed"
+    assert payload["tasks"][1]["task_id"] == "id-bad"
+    assert payload["tasks"][1]["reason_code"] == "http_status"
 
 
 def test_history_records_payload_includes_resume_diagnostics():

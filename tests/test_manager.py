@@ -8,7 +8,12 @@ from rich.console import Console
 from pdman.downloader import Downloader
 from pdman.manager import Manager
 from pdman.output_modes import OutputMode
-from pdman.output_renderers import NoOpProgress, PlainOutputRenderer, RichOutputRenderer
+from pdman.output_renderers import (
+    NoOpProgress,
+    PlainOutputRenderer,
+    RichOutputRenderer,
+    StructuredOutputRenderer,
+)
 from pdman.status import TaskReason, TaskResult, TaskStatus
 
 
@@ -58,11 +63,11 @@ def test_manager_uses_plain_renderer_for_non_rich_output():
     assert isinstance(manager._progress, NoOpProgress)
 
 
-def test_manager_uses_plain_renderer_for_structured_output_until_renderer_lands():
+def test_manager_uses_structured_renderer_for_machine_output():
     manager = Manager(log_path=None, output_mode="jsonl")
 
     assert manager.output_mode is OutputMode.JSONL
-    assert isinstance(manager._output_renderer, PlainOutputRenderer)
+    assert isinstance(manager._output_renderer, StructuredOutputRenderer)
     assert isinstance(manager._progress, NoOpProgress)
 
 
@@ -91,6 +96,38 @@ def test_manager_plain_output_emits_low_frequency_lifecycle_lines():
     assert "reason=download completed" in output
     assert "Summary:" in output
     assert "completed: 1" in output
+
+
+def test_manager_json_output_emits_final_summary_only(capsys):
+    manager = Manager(log_path=None, output_mode="json")
+
+    manager._start_runtime_run()
+    manager.record_task_result(
+        TaskResult(
+            url="https://example.com/ok.bin",
+            filename="ok.bin",
+            status=TaskStatus.COMPLETED,
+            reason="download completed",
+            downloaded_bytes=1024,
+            total_bytes=1024,
+        )
+    )
+    manager.run_finished_at = "2026-07-04T00:00:01Z"
+    manager.print_summary()
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["schema_version"] == 1
+    assert payload["kind"] == "download_summary"
+    assert payload["run_id"] == manager.run_id
+    assert payload["status"] == "completed"
+    assert payload["exit_code"] == 0
+    assert payload["counts"] == {"completed": 1, "skipped": 0, "failed": 0}
+    assert payload["tasks"][0]["task_id"] == manager._task_id_for_url(
+        "https://example.com/ok.bin"
+    )
+    assert payload["tasks"][0]["status"] == "completed"
+    assert payload["tasks"][0]["resume_rejection"]["present"] is False
 
 
 def test_manager_structured_output_suppresses_human_lifecycle_lines():
