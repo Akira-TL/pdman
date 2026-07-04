@@ -1,6 +1,9 @@
 import json
 
+import pytest
+
 import pdman.cli as cli
+from pdman.output_modes import OutputMode
 
 
 class StubManager:
@@ -8,6 +11,9 @@ class StubManager:
 
     def __init__(self, *args, **kwargs):
         StubManager.last_instance = self
+        self.args = args
+        self.kwargs = kwargs
+        self.output_mode = kwargs.get("output_mode")
         self.exit_code = 1
         self.added_urls = []
         self.loaded_inputs = []
@@ -35,6 +41,29 @@ def test_cli_returns_manager_exit_code(monkeypatch):
     exit_code = cli.main(["https://example.com/file.bin"])
 
     assert exit_code == 1
+
+
+def test_cli_output_mode_is_passed_to_manager(monkeypatch):
+    monkeypatch.setattr(cli, "Manager", StubManager)
+
+    exit_code = cli.main(["--output", "jsonl", "https://example.com/file.bin"])
+
+    assert exit_code == 1
+    assert StubManager.last_instance.output_mode is OutputMode.JSONL
+
+
+def test_cli_output_mode_defaults_to_plain_for_non_tty(monkeypatch):
+    monkeypatch.setattr(cli, "Manager", StubManager)
+    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: False)
+
+    cli.main(["https://example.com/file.bin"])
+
+    assert StubManager.last_instance.output_mode is OutputMode.PLAIN
+
+
+def test_cli_output_mode_rejects_invalid_value():
+    with pytest.raises(SystemExit):
+        cli.main(["--output", "xml", "https://example.com/file.bin"])
 
 
 def test_cli_input_schema_json(capsys):

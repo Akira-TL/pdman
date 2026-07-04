@@ -37,6 +37,7 @@ from rich.progress import (
 )
 from .chunk import Chunk
 from .downloader import Downloader
+from .output_modes import OutputMode, resolve_output_mode
 from .runtime import RuntimePaths, task_result_to_record, utc_now_iso
 from .status import TaskResult, TaskStatus
 from .task_input import load_task_input
@@ -185,6 +186,7 @@ class Manager:
         quit_if_exists: bool = False,
         summary_interval: float = 1.0,
         segment_mode: str = "static",
+        output_mode: str | OutputMode | None = None,
     ):
         self.max_downloads = max_downloads
         self.timeout = timeout
@@ -246,6 +248,10 @@ class Manager:
         self.quit_if_exists = quit_if_exists
         self.summary_interval = summary_interval
         self.segment_mode = segment_mode
+        self.output_mode = resolve_output_mode(
+            output_mode,
+            is_tty=sys.stdout.isatty(),
+        )
 
         self._urls_lock = asyncio.Lock()
         self._urls: dict = {}  # {url: Downloader item, ...}

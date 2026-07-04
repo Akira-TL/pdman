@@ -20,6 +20,7 @@ from .history import (
     query_history,
 )
 from .manager import Manager
+from .output_modes import OUTPUT_MODE_CHOICES, resolve_output_mode
 from .output import (
     history_records_payload,
     print_json,
@@ -949,6 +950,12 @@ def main(argv=None):
         help="Enable debug mode with verbose logging.",
     )
     parser.add_argument(
+        "--output",
+        choices=OUTPUT_MODE_CHOICES,
+        default=None,
+        help="Select main download output mode: rich, plain, json, or jsonl.",
+    )
+    parser.add_argument(
         "-d",
         "--dir",
         type=str,
@@ -1230,6 +1237,7 @@ def main(argv=None):
     )
 
     args = parser.parse_args(argv)
+    output_mode = resolve_output_mode(args.output, is_tty=sys.stdout.isatty())
     if args.list_groups:
         return _handle_list_groups(args.input_file, json_output=args.json)
     if args.dry_run:
@@ -1297,6 +1305,7 @@ def main(argv=None):
         conf_path=args.conf_path,
         quit_if_exists=args.quit_if_exists,
         summary_interval=args.summary_interval,
+        output_mode=output_mode,
     )
 
     if args.urls and len(args.urls) == 1 and args.out is not None:
